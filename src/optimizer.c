@@ -136,7 +136,7 @@ void optimize_memset(Program *optimized, const Program *original) {
   program_calculate_loops(optimized);
 }
 
-void optimize_find_empty(Program *optimized, const Program *original) {
+void optimize_seek_empty(Program *optimized, const Program *original) {
   memset(optimized, 0, sizeof(*optimized));
 
   addr_t opt_index = 0;
@@ -148,7 +148,7 @@ void optimize_find_empty(Program *optimized, const Program *original) {
       if (i + 2 < original->size &&
           original->instructions[i + 1].op == OP_RIGHT &&
           original->instructions[i + 2].op == OP_END) {
-        optimized->instructions[opt_index].op = OP_FIND_EMPTY;
+        optimized->instructions[opt_index].op = OP_SEEK_EMPTY;
         optimized->instructions[opt_index].arg =
             original->instructions[i + 1].arg;
         i += 2; /* Skip the next two instructions */
@@ -269,7 +269,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
     case OP_IN:
     case OP_OUT:
     case OP_SET:
-    case OP_FIND_EMPTY:
+    case OP_SEEK_EMPTY:
     case OP_TRANSFER:
       return 0;
 
@@ -374,7 +374,7 @@ void optimize_transfer_inc(Program *optimized, const Program *original) {
         }
 
         if (next->op == OP_LOOP || next->op == OP_END || next->op == OP_RIGHT ||
-            next->op == OP_FIND_EMPTY || next->op == OP_TRANSFER ||
+            next->op == OP_SEEK_EMPTY || next->op == OP_TRANSFER ||
             next->op == OP_IN || next->op == OP_OUT) {
           break;
         }
@@ -429,7 +429,7 @@ void optimize_offsets(Program *optimized, const Program *original) {
 
     case OP_LOOP:
     case OP_END:
-    case OP_FIND_EMPTY:
+    case OP_SEEK_EMPTY:
     case OP_TRANSFER:
       if (virtual_offset != 0) {
         optimized->instructions[opt_index].op = OP_RIGHT;
@@ -510,7 +510,7 @@ void optimize_set_inc_merge(Program *optimized, const Program *original) {
 
         if (next->op == OP_LOOP || next->op == OP_END || next->op == OP_IN ||
             next->op == OP_OUT || next->op == OP_RIGHT ||
-            next->op == OP_FIND_EMPTY || next->op == OP_TRANSFER) {
+            next->op == OP_SEEK_EMPTY || next->op == OP_TRANSFER) {
           break;
         }
 
@@ -561,7 +561,7 @@ void optimize_transfer_offsets(Program *optimized, const Program *original) {
         if (original->instructions[j].op == OP_RIGHT ||
             original->instructions[j].op == OP_LOOP ||
             original->instructions[j].op == OP_END ||
-            original->instructions[j].op == OP_FIND_EMPTY) {
+            original->instructions[j].op == OP_SEEK_EMPTY) {
           break;
         }
       }
@@ -577,7 +577,7 @@ void optimize_transfer_offsets(Program *optimized, const Program *original) {
           if (original->instructions[j].op == OP_LOOP ||
               original->instructions[j].op == OP_END ||
               original->instructions[j].op == OP_TRANSFER ||
-              original->instructions[j].op == OP_FIND_EMPTY) {
+              original->instructions[j].op == OP_SEEK_EMPTY) {
             break;
           }
         }
@@ -643,7 +643,7 @@ void optimize_program(Program *program) {
     optimize_memset(&optimized, program);
     *program = optimized;
 
-    optimize_find_empty(&optimized, program);
+    optimize_seek_empty(&optimized, program);
     *program = optimized;
 
     optimize_multi_transfer(&optimized, program);

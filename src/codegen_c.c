@@ -48,7 +48,7 @@ void codegen_c(const Program *program, FILE *output) {
 
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
-    if (instr->op == OP_FIND_EMPTY) {
+    if (instr->op == OP_SEEK_EMPTY) {
       needs_seek_empty = 1;
     } else if (instr->op == OP_TRANSFER) {
       if (instr->arg == 1) {
@@ -215,7 +215,7 @@ void codegen_c(const Program *program, FILE *output) {
       }
       break;
 
-    case OP_FIND_EMPTY:
+    case OP_SEEK_EMPTY:
       print_c_indent(output, indent_level);
       fprintf(output, "seek_empty(&dp, %d);\n", instr->arg);
       break;

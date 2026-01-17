@@ -120,7 +120,7 @@ void codegen_nasm(const Program *program, FILE *output) {
       }
       break;
 
-    case OP_FIND_EMPTY:
+    case OP_SEEK_EMPTY:
       fprintf(output, ".find_empty_%d:\n", i);
       fprintf(output, "    cmp byte [rbx], 0\n");
       fprintf(output, "    je .find_empty_done_%d\n", i);

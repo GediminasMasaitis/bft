@@ -20,7 +20,7 @@ typedef enum {
 
   // extended
   OP_SET = 'S',
-  OP_FIND_EMPTY = 'E',
+  OP_SEEK_EMPTY = 'E',
   OP_TRANSFER = 'T'
 } OpCode;
 
