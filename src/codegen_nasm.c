@@ -100,7 +100,8 @@ void codegen_nasm(const Program *program, FILE *output) {
         if (instr->arg2 <= 1) {
           fprintf(output, "    mov byte [rbx], %d\n", instr->arg);
         } else {
-          fprintf(output, "    ; memset %d cells to %d\n", instr->arg2, instr->arg);
+          fprintf(output, "    ; memset %d cells to %d\n", instr->arg2,
+                  instr->arg);
           fprintf(output, "    mov rdi, rbx\n");
           fprintf(output, "    mov al, %d\n", instr->arg);
           fprintf(output, "    mov rcx, %d\n", instr->arg2);

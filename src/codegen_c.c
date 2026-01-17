@@ -43,6 +43,23 @@ void codegen_c(const Program *program, FILE *output) {
     }
   }
 
+  int needs_seek_empty = 0;
+  int needs_transfer = 0;
+  int needs_transfer_multiple = 0;
+
+  for (addr_t i = 0; i < program->size; i++) {
+    const Instruction *instr = &program->instructions[i];
+    if (instr->op == OP_FIND_EMPTY) {
+      needs_seek_empty = 1;
+    } else if (instr->op == OP_TRANSFER) {
+      if (instr->arg == 1) {
+        needs_transfer = 1;
+      } else {
+        needs_transfer_multiple = 1;
+      }
+    }
+  }
+
   fprintf(output, "#include <stdio.h>\n");
   fprintf(output, "#include <string.h>\n");
   fprintf(output, "\n");
@@ -51,24 +68,33 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "static unsigned char cells[CELL_COUNT];\n");
   fprintf(output, "\n");
 
-  fprintf(output, "static void seek_empty(unsigned char **dp, int step) {\n");
-  fprintf(output, "  while (**dp != 0) *dp += step;\n");
-  fprintf(output, "}\n");
-  fprintf(output, "\n");
+  if (needs_seek_empty) {
+    fprintf(output, "static void seek_empty(unsigned char **dp, int step) {\n");
+    fprintf(output, "  while (**dp != 0) *dp += step;\n");
+    fprintf(output, "}\n");
+    fprintf(output, "\n");
+  }
 
-  fprintf(output, "static void transfer(unsigned char *dp, const int offset, const int factor, const int final_val) {\n");
-  fprintf(output, "  dp[offset] += *dp * factor;\n");
-  fprintf(output, "  *dp = final_val;\n");
-  fprintf(output, "}\n");
-  fprintf(output, "\n");
+  if (needs_transfer) {
+    fprintf(output, "static void transfer(unsigned char *dp, const int offset, "
+                    "const int factor, const int final_val) {\n");
+    fprintf(output, "  dp[offset] += *dp * factor;\n");
+    fprintf(output, "  *dp = final_val;\n");
+    fprintf(output, "}\n");
+    fprintf(output, "\n");
+  }
 
-  fprintf(output, "static void transfer_multiple(unsigned char *dp, int count, const int offsets[], const int factors[], const int final_val) {\n");
-  fprintf(output, "  for (int i = 0; i < count; i++) {\n");
-  fprintf(output, "    dp[offsets[i]] += *dp * factors[i];\n");
-  fprintf(output, "  }\n");
-  fprintf(output, "  *dp = final_val;\n");
-  fprintf(output, "}\n");
-  fprintf(output, "\n");
+  if (needs_transfer_multiple) {
+    fprintf(output,
+            "static void transfer_multiple(unsigned char *dp, int count, const "
+            "int offsets[], const int factors[], const int final_val) {\n");
+    fprintf(output, "  for (int i = 0; i < count; i++) {\n");
+    fprintf(output, "    dp[offsets[i]] += *dp * factors[i];\n");
+    fprintf(output, "  }\n");
+    fprintf(output, "  *dp = final_val;\n");
+    fprintf(output, "}\n");
+    fprintf(output, "\n");
+  }
 
   fprintf(output, "int main(void) {\n");
   fprintf(output, "  unsigned char *dp = cells;\n");
@@ -196,18 +222,22 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
       if (instr->arg == 1) {
-        fprintf(output, "transfer(dp, %d, %d, %d);\n",
-                instr->targets[0].offset, instr->targets[0].factor, instr->arg2);
+        fprintf(output, "transfer(dp, %d, %d, %d);\n", instr->targets[0].offset,
+                instr->targets[0].factor, instr->arg2);
       } else {
         fprintf(output, "transfer_multiple(dp, %d, (int[]){", instr->arg);
-        for (int transfer_index = 0; transfer_index < instr->arg; transfer_index++) {
+        for (int transfer_index = 0; transfer_index < instr->arg;
+             transfer_index++) {
           fprintf(output, "%d", instr->targets[transfer_index].offset);
-          if (transfer_index < instr->arg - 1) fprintf(output, ", ");
+          if (transfer_index < instr->arg - 1)
+            fprintf(output, ", ");
         }
         fprintf(output, "}, (int[]){");
-        for (int transfer_index = 0; transfer_index < instr->arg; transfer_index++) {
+        for (int transfer_index = 0; transfer_index < instr->arg;
+             transfer_index++) {
           fprintf(output, "%d", instr->targets[transfer_index].factor);
-          if (transfer_index < instr->arg - 1) fprintf(output, ", ");
+          if (transfer_index < instr->arg - 1)
+            fprintf(output, ", ");
         }
         fprintf(output, "}, %d);\n", instr->arg2);
       }

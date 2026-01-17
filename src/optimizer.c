@@ -177,10 +177,10 @@ void optimize_transfer(Program *optimized, const Program *original) {
         const Instruction right2 = original->instructions[i + 4];
         const Instruction end = original->instructions[i + 5];
 
-        const int match =
-            dec.op == OP_INC && dec.arg == -1 && right1.op == OP_RIGHT &&
-            inc.op == OP_INC && right2.op == OP_RIGHT && end.op == OP_END &&
-            right1.arg + right2.arg == 0;
+        const int match = dec.op == OP_INC && dec.arg == -1 &&
+                          right1.op == OP_RIGHT && inc.op == OP_INC &&
+                          right2.op == OP_RIGHT && end.op == OP_END &&
+                          right1.arg + right2.arg == 0;
 
         if (match) {
           optimized->instructions[opt_index].op = OP_TRANSFER;
@@ -232,7 +232,6 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
   }
   i++;
 
-
   i32 current_offset = 0;
 
   i32 offsets[MAX_TRANSFER_TARGETS + 1]; // +1 for source
@@ -247,25 +246,23 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
       current_offset += instr->arg;
       break;
 
-    case OP_INC:
-      {
-        int found = 0;
-        for (int j = 0; j < num_entries; j++) {
-          if (offsets[j] == current_offset) {
-            factors[j] += instr->arg;
-            found = 1;
-            break;
-          }
-        }
-        if (!found) {
-          if (num_entries >= MAX_TRANSFER_TARGETS + 1)
-            return 0;
-          offsets[num_entries] = current_offset;
-          factors[num_entries] = instr->arg;
-          num_entries++;
+    case OP_INC: {
+      int found = 0;
+      for (int j = 0; j < num_entries; j++) {
+        if (offsets[j] == current_offset) {
+          factors[j] += instr->arg;
+          found = 1;
+          break;
         }
       }
-      break;
+      if (!found) {
+        if (num_entries >= MAX_TRANSFER_TARGETS + 1)
+          return 0;
+        offsets[num_entries] = current_offset;
+        factors[num_entries] = instr->arg;
+        num_entries++;
+      }
+    } break;
 
     case OP_LOOP:
     case OP_END:
@@ -373,10 +370,9 @@ void optimize_transfer_inc(Program *optimized, const Program *original) {
           break;
         }
 
-        if (next->op == OP_LOOP || next->op == OP_END ||
-            next->op == OP_RIGHT || next->op == OP_FIND_EMPTY ||
-            next->op == OP_TRANSFER || next->op == OP_IN ||
-            next->op == OP_OUT) {
+        if (next->op == OP_LOOP || next->op == OP_END || next->op == OP_RIGHT ||
+            next->op == OP_FIND_EMPTY || next->op == OP_TRANSFER ||
+            next->op == OP_IN || next->op == OP_OUT) {
           break;
         }
 

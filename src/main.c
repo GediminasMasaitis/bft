@@ -17,8 +17,7 @@ static void print_usage(const char *prog_name) {
   fprintf(stderr, "  -s, --emit-asm    Generate NASM assembly\n");
   fprintf(stderr,
           "  -o, --output FILE Write output to FILE instead of stdout\n");
-  fprintf(stderr,
-          "  -d, --dump        Dump optimized instructions\n");
+  fprintf(stderr, "  -d, --dump        Dump optimized instructions\n");
   fprintf(stderr, "  -h, --help        Show this help message\n");
 }
 
