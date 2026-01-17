@@ -139,7 +139,11 @@ void codegen_nasm(const Program *program, FILE *output) {
     case OP_TRANSFER:
       fprintf(output, "    movzx eax, byte [rbx]\n");
       fprintf(output, "    test al, al\n");
-      fprintf(output, "    jz .transfer_done_%d\n", i);
+      if (instr->arg2 == 0) {
+        fprintf(output, "    jz .transfer_done_%d\n", i);
+      } else {
+        fprintf(output, "    jz .transfer_set_%d\n", i);
+      }
 
       for (int t = 0; t < instr->arg; t++) {
         i32 offset = instr->targets[t].offset;
@@ -162,7 +166,10 @@ void codegen_nasm(const Program *program, FILE *output) {
         }
       }
 
-      fprintf(output, "    mov byte [rbx], 0\n");
+      if (instr->arg2 != 0) {
+        fprintf(output, ".transfer_set_%d:\n", i);
+      }
+      fprintf(output, "    mov byte [rbx], %d\n", instr->arg2);
       fprintf(output, ".transfer_done_%d:\n", i);
       break;
 

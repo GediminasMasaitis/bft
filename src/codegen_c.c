@@ -193,7 +193,7 @@ void codegen_c(const Program *program, FILE *output) {
         }
       }
       print_c_indent(output, indent_level);
-      fprintf(output, "*dp = 0;\n");
+      fprintf(output, "*dp = %d;\n", instr->arg2);
       break;
 
     default:

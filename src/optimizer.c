@@ -333,7 +333,7 @@ void optimize_multi_transfer(Program *optimized, const Program *original) {
         }
 
         addr_t loop_len = get_loop_length(original, i);
-        i += loop_len - 1; // -1 because loop will increment
+        i += loop_len - 1;
 
         opt_index++;
         continue;
@@ -342,6 +342,62 @@ void optimize_multi_transfer(Program *optimized, const Program *original) {
 
     optimized->instructions[opt_index] = original->instructions[i];
     opt_index++;
+  }
+
+  optimized->size = opt_index;
+  program_calculate_loops(optimized);
+}
+
+void optimize_transfer_inc(Program *optimized, const Program *original) {
+  memset(optimized, 0, sizeof(*optimized));
+  addr_t opt_index = 0;
+
+  for (addr_t i = 0; i < original->size; i++) {
+    const Instruction *curr = &original->instructions[i];
+
+    if (curr->op == OP_TRANSFER) {
+      i32 final_value = curr->arg2;
+      addr_t j = i + 1;
+
+      while (j < original->size) {
+        const Instruction *next = &original->instructions[j];
+
+        if (next->op == OP_INC && next->offset == 0) {
+          final_value += next->arg;
+          j++;
+          continue;
+        }
+
+        // do explici srt merge pass?
+        if (next->op == OP_SET && next->offset == 0) {
+          break;
+        }
+
+        if (next->op == OP_LOOP || next->op == OP_END ||
+            next->op == OP_RIGHT || next->op == OP_FIND_EMPTY ||
+            next->op == OP_TRANSFER || next->op == OP_IN ||
+            next->op == OP_OUT) {
+          break;
+        }
+
+        if ((next->op == OP_INC || next->op == OP_SET) && next->offset != 0) {
+          optimized->instructions[opt_index++] = *next;
+          j++;
+          continue;
+        }
+
+        break;
+      }
+
+      optimized->instructions[opt_index] = *curr;
+      optimized->instructions[opt_index].arg2 = final_value;
+      opt_index++;
+
+      i = j - 1;
+      continue;
+    }
+
+    optimized->instructions[opt_index++] = *curr;
   }
 
   optimized->size = opt_index;
@@ -506,6 +562,9 @@ void optimize_program(Program *program) {
     *program = optimized;
 
     optimize_multi_transfer(&optimized, program);
+    *program = optimized;
+
+    optimize_transfer_inc(&optimized, program);
     *program = optimized;
 
     optimize_dead_stores(&optimized, program);
