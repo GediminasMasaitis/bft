@@ -56,6 +56,20 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "}\n");
   fprintf(output, "\n");
 
+  fprintf(output, "static void transfer(unsigned char *dp, const int offset, const int factor, const int final_val) {\n");
+  fprintf(output, "  dp[offset] += *dp * factor;\n");
+  fprintf(output, "  *dp = final_val;\n");
+  fprintf(output, "}\n");
+  fprintf(output, "\n");
+
+  fprintf(output, "static void transfer_multiple(unsigned char *dp, int count, const int offsets[], const int factors[], const int final_val) {\n");
+  fprintf(output, "  for (int i = 0; i < count; i++) {\n");
+  fprintf(output, "    dp[offsets[i]] += *dp * factors[i];\n");
+  fprintf(output, "  }\n");
+  fprintf(output, "  *dp = final_val;\n");
+  fprintf(output, "}\n");
+  fprintf(output, "\n");
+
   fprintf(output, "int main(void) {\n");
   fprintf(output, "  unsigned char *dp = cells;\n");
   fprintf(output, "\n");
@@ -180,20 +194,23 @@ void codegen_c(const Program *program, FILE *output) {
       break;
 
     case OP_TRANSFER:
-      for (int t = 0; t < instr->arg; t++) {
-        i32 offset = instr->targets[t].offset;
-        i32 factor = instr->targets[t].factor;
-        const char sign = factor >= 0 ? '+' : '-';
-        const i32 factor_abs = factor >= 0 ? factor : -factor;
-        print_c_indent(output, indent_level);
-        if (factor_abs == 1) {
-          fprintf(output, "dp[%d] %c= *dp;\n", offset, sign);
-        } else {
-          fprintf(output, "dp[%d] %c= *dp * %d;\n", offset, sign, factor_abs);
-        }
-      }
       print_c_indent(output, indent_level);
-      fprintf(output, "*dp = %d;\n", instr->arg2);
+      if (instr->arg == 1) {
+        fprintf(output, "transfer(dp, %d, %d, %d);\n",
+                instr->targets[0].offset, instr->targets[0].factor, instr->arg2);
+      } else {
+        fprintf(output, "transfer_multiple(dp, %d, (int[]){", instr->arg);
+        for (int transfer_index = 0; transfer_index < instr->arg; transfer_index++) {
+          fprintf(output, "%d", instr->targets[transfer_index].offset);
+          if (transfer_index < instr->arg - 1) fprintf(output, ", ");
+        }
+        fprintf(output, "}, (int[]){");
+        for (int transfer_index = 0; transfer_index < instr->arg; transfer_index++) {
+          fprintf(output, "%d", instr->targets[transfer_index].factor);
+          if (transfer_index < instr->arg - 1) fprintf(output, ", ");
+        }
+        fprintf(output, "}, %d);\n", instr->arg2);
+      }
       break;
 
     default:
