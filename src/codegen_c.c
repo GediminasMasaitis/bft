@@ -22,7 +22,6 @@ static void print_c_right_increment(FILE *output, i32 arg) {
 }
 
 void codegen_c(const Program *program, FILE *output) {
-  // for-loop skip
   int *skip = calloc(program->size, sizeof(int));
   if (!skip) {
     fprintf(stderr, "Error: Could not allocate memory for skip array\n");
@@ -69,29 +68,31 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "\n");
 
   if (needs_seek_empty) {
-    fprintf(output, "static void seek_empty(unsigned char **dp, int step) {\n");
+    fprintf(output,
+            "static void seek_empty(unsigned char **dp, const int step) {\n");
     fprintf(output, "  while (**dp != 0) *dp += step;\n");
     fprintf(output, "}\n");
     fprintf(output, "\n");
   }
 
   if (needs_transfer) {
-    fprintf(output, "static void transfer(unsigned char *dp, const int offset, "
-                    "const int factor, const int final_val) {\n");
-    fprintf(output, "  dp[offset] += *dp * factor;\n");
-    fprintf(output, "  *dp = final_val;\n");
+    fprintf(output,
+            "static void transfer(unsigned char *dp, const int src_offset, "
+            "const int dst_offset, const int factor, const int final_val) {\n");
+    fprintf(output, "  dp[dst_offset] += dp[src_offset] * factor;\n");
+    fprintf(output, "  dp[src_offset] = final_val;\n");
     fprintf(output, "}\n");
     fprintf(output, "\n");
   }
 
   if (needs_transfer_multiple) {
-    fprintf(output,
-            "static void transfer_multiple(unsigned char *dp, int count, const "
-            "int offsets[], const int factors[], const int final_val) {\n");
+    fprintf(output, "static void transfer_multiple(unsigned char *dp, const "
+                    "int src_offset, const int count, const int dst_offsets[], "
+                    "const int factors[], const int final_val) {\n");
     fprintf(output, "  for (int i = 0; i < count; i++) {\n");
-    fprintf(output, "    dp[offsets[i]] += *dp * factors[i];\n");
+    fprintf(output, "    dp[dst_offsets[i]] += dp[src_offset] * factors[i];\n");
     fprintf(output, "  }\n");
-    fprintf(output, "  *dp = final_val;\n");
+    fprintf(output, "  dp[src_offset] = final_val;\n");
     fprintf(output, "}\n");
     fprintf(output, "\n");
   }
@@ -222,10 +223,12 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
       if (instr->arg == 1) {
-        fprintf(output, "transfer(dp, %d, %d, %d);\n", instr->targets[0].offset,
-                instr->targets[0].factor, instr->arg2);
+        fprintf(output, "transfer(dp, %d, %d, %d, %d);\n", instr->offset,
+                instr->targets[0].offset, instr->targets[0].factor,
+                instr->arg2);
       } else {
-        fprintf(output, "transfer_multiple(dp, %d, (int[]){", instr->arg);
+        fprintf(output, "transfer_multiple(dp, %d, %d, (int[]){", instr->offset,
+                instr->arg);
         for (int transfer_index = 0; transfer_index < instr->arg;
              transfer_index++) {
           fprintf(output, "%d", instr->targets[transfer_index].offset);

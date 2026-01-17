@@ -354,19 +354,22 @@ void optimize_transfer_inc(Program *optimized, const Program *original) {
 
     if (curr->op == OP_TRANSFER) {
       i32 final_value = curr->arg2;
+      i32 src_offset = curr->offset; /* Transfer's source offset */
       addr_t j = i + 1;
 
       while (j < original->size) {
         const Instruction *next = &original->instructions[j];
 
-        if (next->op == OP_INC && next->offset == 0) {
+        /* Only merge INC if it targets the same cell as the transfer's source
+         */
+        if (next->op == OP_INC && next->offset == src_offset) {
           final_value += next->arg;
           j++;
           continue;
         }
 
         // do explici srt merge pass?
-        if (next->op == OP_SET && next->offset == 0) {
+        if (next->op == OP_SET && next->offset == src_offset) {
           break;
         }
 
@@ -376,7 +379,8 @@ void optimize_transfer_inc(Program *optimized, const Program *original) {
           break;
         }
 
-        if ((next->op == OP_INC || next->op == OP_SET) && next->offset != 0) {
+        if ((next->op == OP_INC || next->op == OP_SET) &&
+            next->offset != src_offset) {
           optimized->instructions[opt_index++] = *next;
           j++;
           continue;
@@ -539,6 +543,91 @@ void optimize_set_inc_merge(Program *optimized, const Program *original) {
   program_calculate_loops(optimized);
 }
 
+void optimize_transfer_offsets(Program *optimized, const Program *original) {
+  memset(optimized, 0, sizeof(*optimized));
+  addr_t opt_index = 0;
+
+  for (addr_t i = 0; i < original->size; i++) {
+    const Instruction *curr = &original->instructions[i];
+    if (curr->op == OP_RIGHT) {
+      i32 n = curr->arg;
+      addr_t transfer_idx = 0;
+      for (addr_t j = i + 1; j < original->size; j++) {
+        if (original->instructions[j].op == OP_TRANSFER) {
+          transfer_idx = j;
+          break;
+        }
+
+        if (original->instructions[j].op == OP_RIGHT ||
+            original->instructions[j].op == OP_LOOP ||
+            original->instructions[j].op == OP_END ||
+            original->instructions[j].op == OP_FIND_EMPTY) {
+          break;
+        }
+      }
+
+      if (transfer_idx > 0) {
+        addr_t right_idx = 0;
+        for (addr_t j = transfer_idx + 1; j < original->size; j++) {
+          if (original->instructions[j].op == OP_RIGHT) {
+            right_idx = j;
+            break;
+          }
+
+          if (original->instructions[j].op == OP_LOOP ||
+              original->instructions[j].op == OP_END ||
+              original->instructions[j].op == OP_TRANSFER ||
+              original->instructions[j].op == OP_FIND_EMPTY) {
+            break;
+          }
+        }
+
+        if (right_idx > 0) {
+          i32 m = original->instructions[right_idx].arg;
+          const Instruction *transfer = &original->instructions[transfer_idx];
+
+          for (addr_t j = i + 1; j < transfer_idx; j++) {
+            Instruction adjusted = original->instructions[j];
+            adjusted.offset += n;
+            optimized->instructions[opt_index++] = adjusted;
+          }
+
+          Instruction new_transfer = *transfer;
+          new_transfer.offset = n;
+
+          for (int t = 0; t < new_transfer.arg; t++) {
+            new_transfer.targets[t].offset += n;
+          }
+
+          optimized->instructions[opt_index++] = new_transfer;
+
+          for (addr_t j = transfer_idx + 1; j < right_idx; j++) {
+            Instruction adjusted = original->instructions[j];
+            adjusted.offset += n;
+            optimized->instructions[opt_index++] = adjusted;
+          }
+
+          if (n + m != 0) {
+            Instruction right;
+            memset(&right, 0, sizeof(right));
+            right.op = OP_RIGHT;
+            right.arg = n + m;
+            optimized->instructions[opt_index++] = right;
+          }
+
+          i = right_idx;
+          continue;
+        }
+      }
+    }
+
+    optimized->instructions[opt_index++] = *curr;
+  }
+
+  optimized->size = opt_index;
+  program_calculate_loops(optimized);
+}
+
 void optimize_program(Program *program) {
   Program optimized;
 
@@ -575,5 +664,8 @@ void optimize_program(Program *program) {
   }
 
   optimize_offsets(&optimized, program);
+  *program = optimized;
+
+  optimize_transfer_offsets(&optimized, program);
   *program = optimized;
 }

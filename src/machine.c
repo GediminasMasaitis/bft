@@ -173,14 +173,15 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_TRANSFER: {
-      cell_t v = *cell;
+      cell_t *src = &machine->cells[machine->dp + instr->offset];
+      cell_t v = *src;
       for (i32 t = 0; t < instr->arg; t++) {
         i32 offset = instr->targets[t].offset;
         i32 factor = instr->targets[t].factor;
         cell_t *dst = &machine->cells[machine->dp + offset];
         *dst = (cell_t)(*dst + (cell_t)(v * (cell_t)factor));
       }
-      *cell = instr->arg2;
+      *src = instr->arg2;
       break;
     }
 
