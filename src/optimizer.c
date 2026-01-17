@@ -511,6 +511,9 @@ void optimize_program(Program *program) {
     optimize_dead_stores(&optimized, program);
     *program = optimized;
 
+    optimize_set_inc_merge(&optimized, program);
+    *program = optimized;
+
     if (program->size == before_size) {
       break;
     }
@@ -518,12 +521,4 @@ void optimize_program(Program *program) {
 
   optimize_offsets(&optimized, program);
   *program = optimized;
-
-  while (1) {
-    addr_t before = program->size;
-    optimize_set_inc_merge(&optimized, program);
-    *program = optimized;
-    if (program->size == before)
-      break;
-  }
 }
