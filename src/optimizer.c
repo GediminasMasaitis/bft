@@ -115,11 +115,7 @@ void optimize_memset(Program *output, const Program *input) {
       }
     }
 
-    // Default: copy instruction (ensure arg2 is set for SET)
     output->instructions[out_index] = instr;
-    if (instr.op == OP_SET && output->instructions[out_index].arg2 == 0) {
-      output->instructions[out_index].arg2 = 1;
-    }
     out_index++;
   }
   output->size = out_index;
