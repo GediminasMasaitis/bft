@@ -4,13 +4,13 @@
 #include "machine.h"
 #include "optimizer.h"
 
-void merge_consecutive_right_inc(Program *output, const Program *input) {
+void merge_consecutive_right_inc(Program *output, const Program *input, const op_t op) {
   memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     Instruction instr = input->instructions[in_index];
-    if (instr.op == OP_RIGHT || instr.op == OP_INC) {
+    if (instr.op == op) {
       i32 count = instr.arg;
       while (in_index + 1 < input->size) {
         if (input->instructions[in_index + 1].op != instr.op) {
@@ -69,11 +69,6 @@ void create_zeroing_sets(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-/*
- * Optimize repeated SET+RIGHT patterns into memset-like operations
- * Detects: S>S>S>S>... where all S have the same value AND all > are RIGHT 1
- * Converts to: SET arg=value, arg2=count (then advances pointer by count-1)
- */
 void optimize_memset(Program *optimized, const Program *original) {
   memset(optimized, 0, sizeof(*optimized));
 
@@ -630,7 +625,10 @@ void optimize_program(Program *program) {
   while (1) {
     addr_t before_size = program->size;
 
-    merge_consecutive_right_inc(&optimized, program);
+    merge_consecutive_right_inc(&optimized, program, OP_RIGHT);
+    *program = optimized;
+
+    merge_consecutive_right_inc(&optimized, program, OP_INC);
     *program = optimized;
 
     create_zeroing_sets(&optimized, program);
