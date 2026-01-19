@@ -1,76 +1,72 @@
+#include <assert.h>
 #include <string.h>
 
 #include "machine.h"
 #include "optimizer.h"
 
-void optimize_counts(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void merge_consecutive_right_inc(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
 
-  addr_t opt_index = 0;
-  for (addr_t i = 0; i < original->size; i++) {
-    Instruction instr = original->instructions[i];
+  addr_t out_index = 0;
+  for (addr_t in_index = 0; in_index < input->size; in_index++) {
+    Instruction instr = input->instructions[in_index];
     if (instr.op == OP_RIGHT || instr.op == OP_INC) {
       i32 count = instr.arg;
-      while (i + 1 < original->size) {
-        if (original->instructions[i + 1].op != instr.op) {
+      while (in_index + 1 < input->size) {
+        if (input->instructions[in_index + 1].op != instr.op) {
           break;
         }
 
-        count += original->instructions[i + 1].arg;
-        i++;
+        count += input->instructions[in_index + 1].arg;
+        in_index++;
       }
-      /* Only emit if count is non-zero */
-      if (count != 0) {
-        optimized->instructions[opt_index].op = instr.op;
-        optimized->instructions[opt_index].arg = count;
-        opt_index++;
-      }
+
+      output->instructions[out_index].op = instr.op;
+      output->instructions[out_index].arg = count;
+      out_index++;
     } else {
-      optimized->instructions[opt_index] = instr;
-      opt_index++;
+      output->instructions[out_index] = instr;
+      out_index++;
     }
   }
-  optimized->size = opt_index;
-
-  program_calculate_loops(optimized);
+  
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_set(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+// Check for pattern [-] or [+]:
+// 
+// Scan for:
+// LOOP
+// INC 1 or INC -1
+// END
+// 
+// Replace with:
+// SET 0 1
+void create_zeroing_sets(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
 
-  addr_t opt_index = 0;
-  for (addr_t i = 0; i < original->size; i++) {
-    Instruction instr = original->instructions[i];
-    if (instr.op == OP_LOOP) {
-      /* Check for pattern [-] or [+] - now INC with arg 1 or -1 */
-      if (i + 2 < original->size &&
-          original->instructions[i + 1].op == OP_INC &&
-          (original->instructions[i + 1].arg == 1 ||
-           original->instructions[i + 1].arg == -1) &&
-          original->instructions[i + 2].op == OP_END) {
-        optimized->instructions[opt_index].op = OP_SET;
-        optimized->instructions[opt_index].arg = 0;
-        optimized->instructions[opt_index].arg2 = 1; /* Default: set 1 cell */
-        i += 2; /* Skip the next two instructions */
-
-        /* Check for following INC that sets a value after zeroing */
-        if (i + 1 < original->size) {
-          if (original->instructions[i + 1].op == OP_INC) {
-            optimized->instructions[opt_index].arg +=
-                original->instructions[i + 1].arg;
-            i++;
-          }
-        }
-
-        opt_index++;
-        continue;
-      }
+  addr_t in_index = 0;
+  for (addr_t out_index = 0; out_index < input->size; out_index++) {
+    Instruction instr = input->instructions[out_index];
+    if (instr.op == OP_LOOP &&
+      out_index + 2 < input->size &&
+          input->instructions[out_index + 1].op == OP_INC &&
+          (input->instructions[out_index + 1].arg == 1 ||
+           input->instructions[out_index + 1].arg == -1) &&
+          input->instructions[out_index + 2].op == OP_END) {
+        output->instructions[in_index].op = OP_SET;
+        output->instructions[in_index].arg = 0; // value
+        output->instructions[in_index].arg2 = 1; // count
+        out_index += 2;
+    } else {
+      output->instructions[in_index] = instr;
     }
-    optimized->instructions[opt_index] = instr;
-    opt_index++;
+    in_index++;
   }
-  optimized->size = opt_index;
-  program_calculate_loops(optimized);
+
+  output->size = in_index;
+  program_calculate_loops(output);
 }
 
 /*
@@ -634,38 +630,38 @@ void optimize_program(Program *program) {
   while (1) {
     addr_t before_size = program->size;
 
-    optimize_counts(&optimized, program);
+    merge_consecutive_right_inc(&optimized, program);
     *program = optimized;
 
-    optimize_set(&optimized, program);
+    create_zeroing_sets(&optimized, program);
     *program = optimized;
 
-    optimize_memset(&optimized, program);
-    *program = optimized;
+    // optimize_memset(&optimized, program);
+    // *program = optimized;
 
-    optimize_seek_empty(&optimized, program);
-    *program = optimized;
+    // optimize_seek_empty(&optimized, program);
+    // *program = optimized;
 
-    optimize_multi_transfer(&optimized, program);
-    *program = optimized;
+    // optimize_multi_transfer(&optimized, program);
+    // *program = optimized;
 
-    optimize_transfer_inc(&optimized, program);
-    *program = optimized;
+    // optimize_transfer_inc(&optimized, program);
+    // *program = optimized;
 
-    optimize_dead_stores(&optimized, program);
-    *program = optimized;
+    // optimize_dead_stores(&optimized, program);
+    // *program = optimized;
 
-    optimize_set_inc_merge(&optimized, program);
-    *program = optimized;
+    // optimize_set_inc_merge(&optimized, program);
+    // *program = optimized;
 
     if (program->size == before_size) {
       break;
     }
   }
 
-  optimize_offsets(&optimized, program);
-  *program = optimized;
+  // optimize_offsets(&optimized, program);
+  // *program = optimized;
 
-  optimize_transfer_offsets(&optimized, program);
-  *program = optimized;
+  // optimize_transfer_offsets(&optimized, program);
+  // *program = optimized;
 }
