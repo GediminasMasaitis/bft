@@ -350,26 +350,6 @@ void optimize_offsets(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
-void optimize_dead_stores(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-  addr_t out_index = 0;
-
-  for (addr_t i = 0; i < input->size; i++) {
-    const Instruction *curr = &input->instructions[i];
-
-    if (curr->op == OP_INC && i + 1 < input->size) {
-      const Instruction *next = &input->instructions[i + 1];
-      if (next->op == OP_SET && curr->offset == next->offset) {
-        continue;
-      }
-    }
-
-    output->instructions[out_index++] = *curr;
-  }
-  output->size = out_index;
-  program_calculate_loops(output);
-}
-
 void optimize_set_inc_merge(Program *output, const Program *original) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
@@ -541,9 +521,6 @@ void optimize_program(Program *program) {
     //  *program = optimized;
 
     //  optimize_transfer_inc(&optimized, program);
-    //  *program = optimized;
-
-    //  optimize_dead_stores(&optimized, program);
     //  *program = optimized;
 
     //  optimize_set_inc_merge(&optimized, program);
