@@ -93,48 +93,6 @@ void optimize_seek_empty(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-void optimize_transfer(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-
-  addr_t out_index = 0;
-
-  for (addr_t i = 0; i < input->size; i++) {
-    if (input->instructions[i].op == OP_LOOP) {
-      if (i + 5 < input->size) {
-        const Instruction dec = input->instructions[i + 1];
-        const Instruction right1 = input->instructions[i + 2];
-        const Instruction inc = input->instructions[i + 3];
-        const Instruction right2 = input->instructions[i + 4];
-        const Instruction end = input->instructions[i + 5];
-
-        const int match = dec.op == OP_INC && dec.arg == -1 &&
-                          right1.op == OP_RIGHT && inc.op == OP_INC &&
-                          right2.op == OP_RIGHT && end.op == OP_END &&
-                          right1.arg + right2.arg == 0;
-
-        if (match) {
-          output->instructions[out_index].op = OP_TRANSFER;
-          output->instructions[out_index].arg = 1;
-          output->instructions[out_index].targets[0] = (TransferTarget){
-              .offset = right1.arg,
-              .factor = inc.arg,
-          };
-          out_index++;
-
-          i += 5;
-          continue;
-        }
-      }
-    }
-
-    output->instructions[out_index] = input->instructions[i];
-    out_index++;
-  }
-
-  output->size = out_index;
-  program_calculate_loops(output);
-}
-
 static addr_t get_loop_length(const Program *output, addr_t input) {
   int depth = 0;
   addr_t i = input;
