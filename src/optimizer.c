@@ -69,12 +69,12 @@ void create_zeroing_sets(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-void optimize_memset(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_memset(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
-  for (addr_t in_index = 0; in_index < original->size; in_index++) {
-    Instruction instr = original->instructions[in_index];
+  for (addr_t in_index = 0; in_index < input->size; in_index++) {
+    Instruction instr = input->instructions[in_index];
 
     /* Look for SET followed by RIGHT 1 pattern */
     if (instr.op == OP_SET) {
@@ -83,9 +83,9 @@ void optimize_memset(Program *optimized, const Program *original) {
 
       /* Count consecutive SET value, RIGHT 1 patterns */
       addr_t j = in_index;
-      while (j + 2 < original->size) {
-        const Instruction *right = &original->instructions[j + 1];
-        const Instruction *next_set = &original->instructions[j + 2];
+      while (j + 2 < input->size) {
+        const Instruction *right = &input->instructions[j + 1];
+        const Instruction *next_set = &input->instructions[j + 2];
 
         /* Check for RIGHT 1 followed by SET with same value */
         if (right->op == OP_RIGHT && right->arg == 1 &&
@@ -99,15 +99,15 @@ void optimize_memset(Program *optimized, const Program *original) {
 
       if (count >= 2) {
         /* Emit the memset SET with count */
-        optimized->instructions[out_index].op = OP_SET;
-        optimized->instructions[out_index].arg = set_value;
-        optimized->instructions[out_index].arg2 = count;
+        output->instructions[out_index].op = OP_SET;
+        output->instructions[out_index].arg = set_value;
+        output->instructions[out_index].arg2 = count;
         out_index++;
 
         /* Emit the pointer movement: we set 'count' cells, so move count-1 to
          * end at last cell */
-        optimized->instructions[out_index].op = OP_RIGHT;
-        optimized->instructions[out_index].arg = count - 1;
+        output->instructions[out_index].op = OP_RIGHT;
+        output->instructions[out_index].arg = count - 1;
         out_index++;
 
         /* Skip past all the instructions we consumed */
@@ -117,56 +117,56 @@ void optimize_memset(Program *optimized, const Program *original) {
     }
 
     /* Default: copy instruction (ensure arg2 is set for SET) */
-    optimized->instructions[out_index] = instr;
-    if (instr.op == OP_SET && optimized->instructions[out_index].arg2 == 0) {
-      optimized->instructions[out_index].arg2 = 1;
+    output->instructions[out_index] = instr;
+    if (instr.op == OP_SET && output->instructions[out_index].arg2 == 0) {
+      output->instructions[out_index].arg2 = 1;
     }
     out_index++;
   }
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_seek_empty(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_seek_empty(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
-  for (addr_t i = 0; i < original->size; i++) {
-    Instruction instr = original->instructions[i];
+  for (addr_t i = 0; i < input->size; i++) {
+    Instruction instr = input->instructions[i];
     if (instr.op == OP_LOOP) {
       /* Check for pattern [>] or [<] - now just RIGHT with positive or negative
        * arg */
-      if (i + 2 < original->size &&
-          original->instructions[i + 1].op == OP_RIGHT &&
-          original->instructions[i + 2].op == OP_END) {
-        optimized->instructions[out_index].op = OP_SEEK_EMPTY;
-        optimized->instructions[out_index].arg =
-            original->instructions[i + 1].arg;
+      if (i + 2 < input->size &&
+          input->instructions[i + 1].op == OP_RIGHT &&
+          input->instructions[i + 2].op == OP_END) {
+        output->instructions[out_index].op = OP_SEEK_EMPTY;
+        output->instructions[out_index].arg =
+            input->instructions[i + 1].arg;
         i += 2; /* Skip the next two instructions */
         out_index++;
         continue;
       }
     }
-    optimized->instructions[out_index] = instr;
+    output->instructions[out_index] = instr;
     out_index++;
   }
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_transfer(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_transfer(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
 
-  for (addr_t i = 0; i < original->size; i++) {
-    if (original->instructions[i].op == OP_LOOP) {
-      if (i + 5 < original->size) {
-        const Instruction dec = original->instructions[i + 1];
-        const Instruction right1 = original->instructions[i + 2];
-        const Instruction inc = original->instructions[i + 3];
-        const Instruction right2 = original->instructions[i + 4];
-        const Instruction end = original->instructions[i + 5];
+  for (addr_t i = 0; i < input->size; i++) {
+    if (input->instructions[i].op == OP_LOOP) {
+      if (i + 5 < input->size) {
+        const Instruction dec = input->instructions[i + 1];
+        const Instruction right1 = input->instructions[i + 2];
+        const Instruction inc = input->instructions[i + 3];
+        const Instruction right2 = input->instructions[i + 4];
+        const Instruction end = input->instructions[i + 5];
 
         const int match = dec.op == OP_INC && dec.arg == -1 &&
                           right1.op == OP_RIGHT && inc.op == OP_INC &&
@@ -174,9 +174,9 @@ void optimize_transfer(Program *optimized, const Program *original) {
                           right1.arg + right2.arg == 0;
 
         if (match) {
-          optimized->instructions[out_index].op = OP_TRANSFER;
-          optimized->instructions[out_index].arg = 1;
-          optimized->instructions[out_index].targets[0] = (TransferTarget){
+          output->instructions[out_index].op = OP_TRANSFER;
+          output->instructions[out_index].arg = 1;
+          output->instructions[out_index].targets[0] = (TransferTarget){
               .offset = right1.arg,
               .factor = inc.arg,
           };
@@ -188,25 +188,25 @@ void optimize_transfer(Program *optimized, const Program *original) {
       }
     }
 
-    optimized->instructions[out_index] = original->instructions[i];
+    output->instructions[out_index] = input->instructions[i];
     out_index++;
   }
 
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-static addr_t get_loop_length(const Program *program, addr_t loop_start) {
+static addr_t get_loop_length(const Program *output, addr_t input) {
   int depth = 0;
-  addr_t i = loop_start;
+  addr_t i = input;
 
-  while (i < program->size) {
-    if (program->instructions[i].op == OP_LOOP) {
+  while (i < output->size) {
+    if (output->instructions[i].op == OP_LOOP) {
       depth++;
-    } else if (program->instructions[i].op == OP_END) {
+    } else if (output->instructions[i].op == OP_END) {
       depth--;
       if (depth == 0) {
-        return i - loop_start + 1;
+        return i - input + 1;
       }
     }
     i++;
@@ -302,25 +302,25 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
   return num_targets;
 }
 
-void optimize_multi_transfer(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_multi_transfer(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
 
-  for (addr_t i = 0; i < original->size; i++) {
-    if (original->instructions[i].op == OP_LOOP) {
+  for (addr_t i = 0; i < input->size; i++) {
+    if (input->instructions[i].op == OP_LOOP) {
       TransferTarget targets[MAX_TRANSFER_TARGETS];
-      int num_targets = analyze_multi_transfer(original, i, targets);
+      int num_targets = analyze_multi_transfer(input, i, targets);
 
       if (num_targets > 0) {
-        optimized->instructions[out_index].op = OP_TRANSFER;
-        optimized->instructions[out_index].arg = num_targets;
+        output->instructions[out_index].op = OP_TRANSFER;
+        output->instructions[out_index].arg = num_targets;
 
         for (int t = 0; t < num_targets; t++) {
-          optimized->instructions[out_index].targets[t] = targets[t];
+          output->instructions[out_index].targets[t] = targets[t];
         }
 
-        addr_t loop_len = get_loop_length(original, i);
+        addr_t loop_len = get_loop_length(input, i);
         i += loop_len - 1;
 
         out_index++;
@@ -328,28 +328,28 @@ void optimize_multi_transfer(Program *optimized, const Program *original) {
       }
     }
 
-    optimized->instructions[out_index] = original->instructions[i];
+    output->instructions[out_index] = input->instructions[i];
     out_index++;
   }
 
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_transfer_inc(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_transfer_inc(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
-  for (addr_t i = 0; i < original->size; i++) {
-    const Instruction *curr = &original->instructions[i];
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
 
     if (curr->op == OP_TRANSFER) {
       i32 final_value = curr->arg2;
       i32 src_offset = curr->offset; /* Transfer's source offset */
       addr_t j = i + 1;
 
-      while (j < original->size) {
-        const Instruction *next = &original->instructions[j];
+      while (j < input->size) {
+        const Instruction *next = &input->instructions[j];
 
         /* Only merge INC if it targets the same cell as the transfer's source
          */
@@ -372,7 +372,7 @@ void optimize_transfer_inc(Program *optimized, const Program *original) {
 
         if ((next->op == OP_INC || next->op == OP_SET) &&
             next->offset != src_offset) {
-          optimized->instructions[out_index++] = *next;
+          output->instructions[out_index++] = *next;
           j++;
           continue;
         }
@@ -380,23 +380,23 @@ void optimize_transfer_inc(Program *optimized, const Program *original) {
         break;
       }
 
-      optimized->instructions[out_index] = *curr;
-      optimized->instructions[out_index].arg2 = final_value;
+      output->instructions[out_index] = *curr;
+      output->instructions[out_index].arg2 = final_value;
       out_index++;
 
       i = j - 1;
       continue;
     }
 
-    optimized->instructions[out_index++] = *curr;
+    output->instructions[out_index++] = *curr;
   }
 
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_offsets(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_offsets(Program *output, const Program *original) {
+  memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
   i32 virtual_offset = 0;
@@ -413,8 +413,8 @@ void optimize_offsets(Program *optimized, const Program *original) {
     case OP_SET:
     case OP_OUT:
     case OP_IN:
-      optimized->instructions[out_index] = *instr;
-      optimized->instructions[out_index].offset = virtual_offset;
+      output->instructions[out_index] = *instr;
+      output->instructions[out_index].offset = virtual_offset;
       out_index++;
       break;
 
@@ -423,58 +423,58 @@ void optimize_offsets(Program *optimized, const Program *original) {
     case OP_SEEK_EMPTY:
     case OP_TRANSFER:
       if (virtual_offset != 0) {
-        optimized->instructions[out_index].op = OP_RIGHT;
-        optimized->instructions[out_index].arg = virtual_offset;
-        optimized->instructions[out_index].offset = 0;
+        output->instructions[out_index].op = OP_RIGHT;
+        output->instructions[out_index].arg = virtual_offset;
+        output->instructions[out_index].offset = 0;
         out_index++;
         virtual_offset = 0;
       }
 
-      optimized->instructions[out_index] = *instr;
-      optimized->instructions[out_index].offset = 0;
+      output->instructions[out_index] = *instr;
+      output->instructions[out_index].offset = 0;
       out_index++;
       break;
 
     default:
       // copy unknowns
-      optimized->instructions[out_index] = *instr;
+      output->instructions[out_index] = *instr;
       out_index++;
       break;
     }
   }
 
   if (virtual_offset != 0) {
-    optimized->instructions[out_index].op = OP_RIGHT;
-    optimized->instructions[out_index].arg = virtual_offset;
+    output->instructions[out_index].op = OP_RIGHT;
+    output->instructions[out_index].arg = virtual_offset;
     out_index++;
   }
 
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_dead_stores(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_dead_stores(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
-  for (addr_t i = 0; i < original->size; i++) {
-    const Instruction *curr = &original->instructions[i];
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
 
-    if (curr->op == OP_INC && i + 1 < original->size) {
-      const Instruction *next = &original->instructions[i + 1];
+    if (curr->op == OP_INC && i + 1 < input->size) {
+      const Instruction *next = &input->instructions[i + 1];
       if (next->op == OP_SET && curr->offset == next->offset) {
         continue;
       }
     }
 
-    optimized->instructions[out_index++] = *curr;
+    output->instructions[out_index++] = *curr;
   }
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_set_inc_merge(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_set_inc_merge(Program *output, const Program *original) {
+  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   addr_t i = 0;
@@ -507,7 +507,7 @@ void optimize_set_inc_merge(Program *optimized, const Program *original) {
 
         if ((next->op == OP_INC || next->op == OP_SET) &&
             next->offset != target_offset) {
-          optimized->instructions[out_index++] = *next;
+          output->instructions[out_index++] = *next;
           j++;
           continue;
         }
@@ -516,71 +516,71 @@ void optimize_set_inc_merge(Program *optimized, const Program *original) {
         break;
       }
 
-      optimized->instructions[out_index].op = OP_SET;
-      optimized->instructions[out_index].arg = value;
-      optimized->instructions[out_index].arg2 = 1;
-      optimized->instructions[out_index].offset = target_offset;
+      output->instructions[out_index].op = OP_SET;
+      output->instructions[out_index].arg = value;
+      output->instructions[out_index].arg2 = 1;
+      output->instructions[out_index].offset = target_offset;
       out_index++;
 
       i = j;
       continue;
     }
 
-    optimized->instructions[out_index++] = *curr;
+    output->instructions[out_index++] = *curr;
     i++;
   }
 
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
-void optimize_transfer_offsets(Program *optimized, const Program *original) {
-  memset(optimized, 0, sizeof(*optimized));
+void optimize_transfer_offsets(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
-  for (addr_t i = 0; i < original->size; i++) {
-    const Instruction *curr = &original->instructions[i];
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
     if (curr->op == OP_RIGHT) {
       i32 n = curr->arg;
       addr_t transfer_idx = 0;
-      for (addr_t j = i + 1; j < original->size; j++) {
-        if (original->instructions[j].op == OP_TRANSFER) {
+      for (addr_t j = i + 1; j < input->size; j++) {
+        if (input->instructions[j].op == OP_TRANSFER) {
           transfer_idx = j;
           break;
         }
 
-        if (original->instructions[j].op == OP_RIGHT ||
-            original->instructions[j].op == OP_LOOP ||
-            original->instructions[j].op == OP_END ||
-            original->instructions[j].op == OP_SEEK_EMPTY) {
+        if (input->instructions[j].op == OP_RIGHT ||
+            input->instructions[j].op == OP_LOOP ||
+            input->instructions[j].op == OP_END ||
+            input->instructions[j].op == OP_SEEK_EMPTY) {
           break;
         }
       }
 
       if (transfer_idx > 0) {
         addr_t right_idx = 0;
-        for (addr_t j = transfer_idx + 1; j < original->size; j++) {
-          if (original->instructions[j].op == OP_RIGHT) {
+        for (addr_t j = transfer_idx + 1; j < input->size; j++) {
+          if (input->instructions[j].op == OP_RIGHT) {
             right_idx = j;
             break;
           }
 
-          if (original->instructions[j].op == OP_LOOP ||
-              original->instructions[j].op == OP_END ||
-              original->instructions[j].op == OP_TRANSFER ||
-              original->instructions[j].op == OP_SEEK_EMPTY) {
+          if (input->instructions[j].op == OP_LOOP ||
+              input->instructions[j].op == OP_END ||
+              input->instructions[j].op == OP_TRANSFER ||
+              input->instructions[j].op == OP_SEEK_EMPTY) {
             break;
           }
         }
 
         if (right_idx > 0) {
-          i32 m = original->instructions[right_idx].arg;
-          const Instruction *transfer = &original->instructions[transfer_idx];
+          i32 m = input->instructions[right_idx].arg;
+          const Instruction *transfer = &input->instructions[transfer_idx];
 
           for (addr_t j = i + 1; j < transfer_idx; j++) {
-            Instruction adjusted = original->instructions[j];
+            Instruction adjusted = input->instructions[j];
             adjusted.offset += n;
-            optimized->instructions[out_index++] = adjusted;
+            output->instructions[out_index++] = adjusted;
           }
 
           Instruction new_transfer = *transfer;
@@ -590,12 +590,12 @@ void optimize_transfer_offsets(Program *optimized, const Program *original) {
             new_transfer.targets[t].offset += n;
           }
 
-          optimized->instructions[out_index++] = new_transfer;
+          output->instructions[out_index++] = new_transfer;
 
           for (addr_t j = transfer_idx + 1; j < right_idx; j++) {
-            Instruction adjusted = original->instructions[j];
+            Instruction adjusted = input->instructions[j];
             adjusted.offset += n;
-            optimized->instructions[out_index++] = adjusted;
+            output->instructions[out_index++] = adjusted;
           }
 
           if (n + m != 0) {
@@ -603,7 +603,7 @@ void optimize_transfer_offsets(Program *optimized, const Program *original) {
             memset(&right, 0, sizeof(right));
             right.op = OP_RIGHT;
             right.arg = n + m;
-            optimized->instructions[out_index++] = right;
+            output->instructions[out_index++] = right;
           }
 
           i = right_idx;
@@ -612,11 +612,11 @@ void optimize_transfer_offsets(Program *optimized, const Program *original) {
       }
     }
 
-    optimized->instructions[out_index++] = *curr;
+    output->instructions[out_index++] = *curr;
   }
 
-  optimized->size = out_index;
-  program_calculate_loops(optimized);
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
 void optimize_program(Program *program) {
