@@ -610,11 +610,13 @@ void optimize_program(Program *program) {
     optimize_offsets(&optimized, program);
     *program = optimized;
 
+    optimize_transfer_offsets(&optimized, program);
+    *program = optimized;
+
     if (program->size == before_size) {
       break;
     }
   }
 
-  optimize_transfer_offsets(&optimized, program);
-  *program = optimized;
+
 }
