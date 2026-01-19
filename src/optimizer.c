@@ -73,8 +73,8 @@ void optimize_memset(Program *optimized, const Program *original) {
   memset(optimized, 0, sizeof(*optimized));
 
   addr_t out_index = 0;
-  for (addr_t i = 0; i < original->size; i++) {
-    Instruction instr = original->instructions[i];
+  for (addr_t in_index = 0; in_index < original->size; in_index++) {
+    Instruction instr = original->instructions[in_index];
 
     /* Look for SET followed by RIGHT 1 pattern */
     if (instr.op == OP_SET) {
@@ -82,7 +82,7 @@ void optimize_memset(Program *optimized, const Program *original) {
       i32 count = 1;
 
       /* Count consecutive SET value, RIGHT 1 patterns */
-      addr_t j = i;
+      addr_t j = in_index;
       while (j + 2 < original->size) {
         const Instruction *right = &original->instructions[j + 1];
         const Instruction *next_set = &original->instructions[j + 2];
@@ -111,7 +111,7 @@ void optimize_memset(Program *optimized, const Program *original) {
         out_index++;
 
         /* Skip past all the instructions we consumed */
-        i = j;
+        in_index = j;
         continue;
       }
     }
@@ -637,29 +637,29 @@ void optimize_program(Program *program) {
     optimize_memset(&optimized, program);
     *program = optimized;
 
-    // optimize_seek_empty(&optimized, program);
-    // *program = optimized;
+     optimize_seek_empty(&optimized, program);
+     *program = optimized;
 
-    // optimize_multi_transfer(&optimized, program);
-    // *program = optimized;
+     optimize_multi_transfer(&optimized, program);
+     *program = optimized;
 
-    // optimize_transfer_inc(&optimized, program);
-    // *program = optimized;
+     optimize_transfer_inc(&optimized, program);
+     *program = optimized;
 
-    // optimize_dead_stores(&optimized, program);
-    // *program = optimized;
+     optimize_dead_stores(&optimized, program);
+     *program = optimized;
 
-    // optimize_set_inc_merge(&optimized, program);
-    // *program = optimized;
+     optimize_set_inc_merge(&optimized, program);
+     *program = optimized;
 
     if (program->size == before_size) {
       break;
     }
   }
 
-  // optimize_offsets(&optimized, program);
-  // *program = optimized;
+   optimize_offsets(&optimized, program);
+   *program = optimized;
 
-  // optimize_transfer_offsets(&optimized, program);
-  // *program = optimized;
+   optimize_transfer_offsets(&optimized, program);
+   *program = optimized;
 }
