@@ -534,8 +534,8 @@ void optimize_program(Program *program) {
     // optimize_memset(&optimized, program);
     // *program = optimized;
 
-     optimize_seek_empty(&optimized, program);
-     *program = optimized;
+    optimize_seek_empty(&optimized, program);
+    *program = optimized;
 
     //  optimize_multi_transfer(&optimized, program);
     //  *program = optimized;
