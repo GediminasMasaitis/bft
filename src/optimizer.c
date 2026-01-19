@@ -77,16 +77,14 @@ void optimize_memset(Program *output, const Program *input) {
     const Instruction instr = input->instructions[in_index];
 
     if (instr.op == OP_SET) {
-      i32 in_set_val = instr.arg;
+      const i32 in_set_val = instr.arg;
       i32 count = 1;
 
-      // Look ahead for consecutive SETs with same value separated by RIGHT 1
       addr_t j = in_index;
       while (j + 2 < input->size) {
         const Instruction *right = &input->instructions[j + 1];
         const Instruction *next_set = &input->instructions[j + 2];
 
-        // Check for RIGHT 1 followed by SET with same value
         if (right->op == OP_RIGHT && right->arg == 1 &&
             next_set->op == OP_SET && next_set->arg == in_set_val) {
           count++;
