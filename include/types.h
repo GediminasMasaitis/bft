@@ -18,8 +18,13 @@ typedef enum {
   OP_END = ']',
   OP_DONE = '\0',
 
-  // extended
+  // Extended
+
   OP_SET = 'S',
+  // arg1: value
+  // arg2: count
+  // offset: offset from data pointer 
+
   OP_SEEK_EMPTY = 'E',
   OP_TRANSFER = 'T'
 } OpCode;
@@ -54,6 +59,7 @@ typedef struct {
   i32 arg;
   i32 arg2;
   i32 offset;
+  i32 stride;
   TransferTarget targets[MAX_TRANSFER_TARGETS];
 } Instruction;
 
