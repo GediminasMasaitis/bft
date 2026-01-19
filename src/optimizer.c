@@ -4,7 +4,8 @@
 #include "machine.h"
 #include "optimizer.h"
 
-void merge_consecutive_right_inc(Program *output, const Program *input, const op_t op) {
+void merge_consecutive_right_inc(Program *output, const Program *input,
+                                 const op_t op) {
   memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
@@ -12,35 +13,40 @@ void merge_consecutive_right_inc(Program *output, const Program *input, const op
     const Instruction instr = input->instructions[in_index];
     if (instr.op == op) {
       i32 count = instr.arg;
+      i32 offset = instr.offset;
       while (in_index + 1 < input->size) {
-        if (input->instructions[in_index + 1].op != instr.op) {
+        const Instruction *next = &input->instructions[in_index + 1];
+
+        // Only merge if same op AND same offset
+        if (next->op != instr.op || next->offset != offset) {
           break;
         }
 
-        count += input->instructions[in_index + 1].arg;
+        count += next->arg;
         in_index++;
       }
 
       output->instructions[out_index].op = instr.op;
       output->instructions[out_index].arg = count;
+      output->instructions[out_index].offset = offset;
       out_index++;
     } else {
       output->instructions[out_index] = instr;
       out_index++;
     }
   }
-  
+
   output->size = out_index;
   program_calculate_loops(output);
 }
 
 // Check for pattern [-] or [+]:
-// 
+//
 // Scan for:
 // LOOP
 // INC 1 or INC -1
 // END
-// 
+//
 // Replace with:
 // SET 0 1
 void create_zeroing_sets(Program *output, const Program *input) {
@@ -49,16 +55,15 @@ void create_zeroing_sets(Program *output, const Program *input) {
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
-    if (instr.op == OP_LOOP &&
-      in_index + 2 < input->size &&
-          input->instructions[in_index + 1].op == OP_INC &&
-          (input->instructions[in_index + 1].arg == 1 ||
-           input->instructions[in_index + 1].arg == -1) &&
-          input->instructions[in_index + 2].op == OP_END) {
-        output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = 0; // value
-        output->instructions[out_index].arg2 = 1; // count
-        in_index += 2;
+    if (instr.op == OP_LOOP && in_index + 2 < input->size &&
+        input->instructions[in_index + 1].op == OP_INC &&
+        (input->instructions[in_index + 1].arg == 1 ||
+         input->instructions[in_index + 1].arg == -1) &&
+        input->instructions[in_index + 2].op == OP_END) {
+      output->instructions[out_index].op = OP_SET;
+      output->instructions[out_index].arg = 0;  // value
+      output->instructions[out_index].arg2 = 1; // count
+      in_index += 2;
     } else {
       output->instructions[out_index] = instr;
     }
@@ -127,13 +132,13 @@ void optimize_seek_empty(Program *output, const Program *input) {
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
 
-    if (instr.op == OP_LOOP &&
-        in_index + 2 < input->size &&
+    if (instr.op == OP_LOOP && in_index + 2 < input->size &&
         input->instructions[in_index + 1].op == OP_RIGHT &&
         input->instructions[in_index + 2].op == OP_END) {
 
       output->instructions[out_index].op = OP_SEEK_EMPTY;
-      output->instructions[out_index].arg = input->instructions[in_index + 1].arg; // stride
+      output->instructions[out_index].arg =
+          input->instructions[in_index + 1].arg; // stride
       in_index += 2;
     } else {
       output->instructions[out_index] = instr;
@@ -320,6 +325,20 @@ void optimize_transfer_inc(Program *output, const Program *input) {
 
         if ((next->op == OP_INC || next->op == OP_SET) &&
             next->offset != src_offset) {
+
+          // Check if this INC/SET targets any of the TRANSFER's destination
+          // offsets If so, we cannot safely reorder it before the TRANSFER
+          int conflicts_with_target = 0;
+          for (int t = 0; t < curr->arg; t++) {
+            if (next->offset == curr->targets[t].offset) {
+              conflicts_with_target = 1;
+              break;
+            }
+          }
+          if (conflicts_with_target) {
+            break;
+          }
+          
           output->instructions[out_index++] = *next;
           j++;
           continue;
@@ -362,14 +381,13 @@ void optimize_offsets(Program *output, const Program *original) {
     case OP_OUT:
     case OP_IN:
       output->instructions[out_index] = *instr;
-      output->instructions[out_index].offset = virtual_offset;
+      output->instructions[out_index].offset = instr->offset + virtual_offset;
       out_index++;
       break;
 
     case OP_LOOP:
     case OP_END:
     case OP_SEEK_EMPTY:
-    case OP_TRANSFER:
       if (virtual_offset != 0) {
         output->instructions[out_index].op = OP_RIGHT;
         output->instructions[out_index].arg = virtual_offset;
@@ -383,8 +401,20 @@ void optimize_offsets(Program *output, const Program *original) {
       out_index++;
       break;
 
+    case OP_TRANSFER:
+      if (virtual_offset != 0) {
+        output->instructions[out_index].op = OP_RIGHT;
+        output->instructions[out_index].arg = virtual_offset;
+        output->instructions[out_index].offset = 0;
+        out_index++;
+        virtual_offset = 0;
+      }
+
+      output->instructions[out_index] = *instr;
+      out_index++;
+      break;
+
     default:
-      // copy unknowns
       output->instructions[out_index] = *instr;
       out_index++;
       break;
@@ -577,14 +607,14 @@ void optimize_program(Program *program) {
     optimize_set_inc_merge(&optimized, program);
     *program = optimized;
 
+    optimize_offsets(&optimized, program);
+    *program = optimized;
+
     if (program->size == before_size) {
       break;
     }
   }
 
-   optimize_offsets(&optimized, program);
-   *program = optimized;
-
-   optimize_transfer_offsets(&optimized, program);
-   *program = optimized;
+  optimize_transfer_offsets(&optimized, program);
+  *program = optimized;
 }
