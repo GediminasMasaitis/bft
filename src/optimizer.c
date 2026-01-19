@@ -4,15 +4,13 @@
 #include "machine.h"
 #include "optimizer.h"
 
-void merge_consecutive_right_inc(Program *output, const Program *input, const op_t target_op) {
-  assert(target_op == OP_RIGHT || target_op == OP_INC);
-
+void merge_consecutive_right_inc(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     Instruction instr = input->instructions[in_index];
-    if (instr.op == target_op) {
+    if (instr.op == OP_RIGHT || instr.op == OP_INC) {
       i32 count = instr.arg;
       while (in_index + 1 < input->size) {
         if (input->instructions[in_index + 1].op != instr.op) {
@@ -48,30 +46,35 @@ void merge_consecutive_right_inc(Program *output, const Program *input, const op
 void create_zeroing_sets(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
 
-  addr_t out_index = 0;
-  for (addr_t in_index = 0; in_index < input->size; in_index++) {
-    Instruction instr = input->instructions[in_index];
+  addr_t in_index = 0;
+  for (addr_t out_index = 0; out_index < input->size; out_index++) {
+    Instruction instr = input->instructions[out_index];
     if (instr.op == OP_LOOP &&
-      in_index + 2 < input->size &&
-          input->instructions[in_index + 1].op == OP_INC &&
-          (input->instructions[in_index + 1].arg == 1 ||
-           input->instructions[in_index + 1].arg == -1) &&
-          input->instructions[in_index + 2].op == OP_END) {
-        output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = 0; // value
-        output->instructions[out_index].arg2 = 1; // count
+      out_index + 2 < input->size &&
+          input->instructions[out_index + 1].op == OP_INC &&
+          (input->instructions[out_index + 1].arg == 1 ||
+           input->instructions[out_index + 1].arg == -1) &&
+          input->instructions[out_index + 2].op == OP_END) {
+        output->instructions[in_index].op = OP_SET;
+        output->instructions[in_index].arg = 0; // value
+        output->instructions[in_index].arg2 = 1; // count
         out_index += 2;
     } else {
-      output->instructions[out_index] = instr;
+      output->instructions[in_index] = instr;
     }
-    out_index++;
+    in_index++;
   }
 
-  output->size = out_index;
+  output->size = in_index;
   program_calculate_loops(output);
 }
 
-void create_memset(Program *optimized, const Program *original) {
+/*
+ * Optimize repeated SET+RIGHT patterns into memset-like operations
+ * Detects: S>S>S>S>... where all S have the same value AND all > are RIGHT 1
+ * Converts to: SET arg=value, arg2=count (then advances pointer by count-1)
+ */
+void optimize_memset(Program *optimized, const Program *original) {
   memset(optimized, 0, sizeof(*optimized));
 
   addr_t opt_index = 0;
@@ -627,17 +630,14 @@ void optimize_program(Program *program) {
   while (1) {
     addr_t before_size = program->size;
 
-    merge_consecutive_right_inc(&optimized, program, OP_RIGHT);
-    *program = optimized;
-
-    merge_consecutive_right_inc(&optimized, program, OP_INC);
+    merge_consecutive_right_inc(&optimized, program);
     *program = optimized;
 
     create_zeroing_sets(&optimized, program);
     *program = optimized;
 
-    optimize_memset(&optimized, program);
-    *program = optimized;
+    // optimize_memset(&optimized, program);
+    // *program = optimized;
 
     // optimize_seek_empty(&optimized, program);
     // *program = optimized;
