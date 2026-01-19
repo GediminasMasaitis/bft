@@ -517,23 +517,23 @@ void optimize_program(Program *program) {
     optimize_seek_empty(&optimized, program);
     *program = optimized;
 
-    //  optimize_multi_transfer(&optimized, program);
-    //  *program = optimized;
+     optimize_multi_transfer(&optimized, program);
+     *program = optimized;
 
-    //  optimize_transfer_inc(&optimized, program);
-    //  *program = optimized;
+     optimize_transfer_inc(&optimized, program);
+     *program = optimized;
 
-    //  optimize_set_inc_merge(&optimized, program);
-    //  *program = optimized;
+     optimize_set_inc_merge(&optimized, program);
+     *program = optimized;
 
     if (program->size == before_size) {
       break;
     }
   }
 
-  //  optimize_offsets(&optimized, program);
-  //  *program = optimized;
+   optimize_offsets(&optimized, program);
+   *program = optimized;
 
-  //  optimize_transfer_offsets(&optimized, program);
-  //  *program = optimized;
+   optimize_transfer_offsets(&optimized, program);
+   *program = optimized;
 }
