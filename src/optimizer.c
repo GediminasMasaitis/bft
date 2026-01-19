@@ -75,21 +75,18 @@ void optimize_seek_empty(Program *output, const Program *input) {
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
-    if (instr.op == OP_LOOP) {
-      /* Check for pattern [>] or [<] - now just RIGHT with positive or negative
-       * arg */
-      if (in_index + 2 < input->size &&
-          input->instructions[in_index + 1].op == OP_RIGHT &&
-          input->instructions[in_index + 2].op == OP_END) {
-        output->instructions[out_index].op = OP_SEEK_EMPTY;
-        output->instructions[out_index].arg =
-            input->instructions[in_index + 1].arg;
-        in_index += 2; /* Skip the next two instructions */
-        out_index++;
-        continue;
-      }
+
+    if (instr.op == OP_LOOP &&
+        in_index + 2 < input->size &&
+        input->instructions[in_index + 1].op == OP_RIGHT &&
+        input->instructions[in_index + 2].op == OP_END) {
+
+      output->instructions[out_index].op = OP_SEEK_EMPTY;
+      output->instructions[out_index].arg = input->instructions[in_index + 1].arg; // stride
+      in_index += 2;
+    } else {
+      output->instructions[out_index] = instr;
     }
-    output->instructions[out_index] = instr;
     out_index++;
   }
   output->size = out_index;
