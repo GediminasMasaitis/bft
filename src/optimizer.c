@@ -9,7 +9,7 @@ void merge_consecutive_right_inc(Program *output, const Program *input, const op
 
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
-    Instruction instr = input->instructions[in_index];
+    const Instruction instr = input->instructions[in_index];
     if (instr.op == op) {
       i32 count = instr.arg;
       while (in_index + 1 < input->size) {
@@ -48,7 +48,7 @@ void create_zeroing_sets(Program *output, const Program *input) {
 
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
-    Instruction instr = input->instructions[in_index];
+    const Instruction instr = input->instructions[in_index];
     if (instr.op == OP_LOOP &&
       in_index + 2 < input->size &&
           input->instructions[in_index + 1].op == OP_INC &&
@@ -74,11 +74,10 @@ void optimize_memset(Program *output, const Program *input) {
 
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
-    Instruction instr = input->instructions[in_index];
+    const Instruction instr = input->instructions[in_index];
 
-    /* Look for SET followed by RIGHT 1 pattern */
     if (instr.op == OP_SET) {
-      i32 set_value = instr.arg;
+      i32 in_set_val = instr.arg;
       i32 count = 1;
 
       /* Count consecutive SET value, RIGHT 1 patterns */
@@ -89,7 +88,7 @@ void optimize_memset(Program *output, const Program *input) {
 
         /* Check for RIGHT 1 followed by SET with same value */
         if (right->op == OP_RIGHT && right->arg == 1 &&
-            next_set->op == OP_SET && next_set->arg == set_value) {
+            next_set->op == OP_SET && next_set->arg == in_set_val) {
           count++;
           j += 2; /* Move past RIGHT and SET */
         } else {
@@ -100,7 +99,7 @@ void optimize_memset(Program *output, const Program *input) {
       if (count >= 2) {
         /* Emit the memset SET with count */
         output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = set_value;
+        output->instructions[out_index].arg = in_set_val;
         output->instructions[out_index].arg2 = count;
         out_index++;
 
@@ -132,7 +131,7 @@ void optimize_seek_empty(Program *output, const Program *input) {
 
   addr_t out_index = 0;
   for (addr_t i = 0; i < input->size; i++) {
-    Instruction instr = input->instructions[i];
+    const Instruction instr = input->instructions[i];
     if (instr.op == OP_LOOP) {
       /* Check for pattern [>] or [<] - now just RIGHT with positive or negative
        * arg */
@@ -637,29 +636,29 @@ void optimize_program(Program *program) {
     optimize_memset(&optimized, program);
     *program = optimized;
 
-     optimize_seek_empty(&optimized, program);
-     *program = optimized;
+    //  optimize_seek_empty(&optimized, program);
+    //  *program = optimized;
 
-     optimize_multi_transfer(&optimized, program);
-     *program = optimized;
+    //  optimize_multi_transfer(&optimized, program);
+    //  *program = optimized;
 
-     optimize_transfer_inc(&optimized, program);
-     *program = optimized;
+    //  optimize_transfer_inc(&optimized, program);
+    //  *program = optimized;
 
-     optimize_dead_stores(&optimized, program);
-     *program = optimized;
+    //  optimize_dead_stores(&optimized, program);
+    //  *program = optimized;
 
-     optimize_set_inc_merge(&optimized, program);
-     *program = optimized;
+    //  optimize_set_inc_merge(&optimized, program);
+    //  *program = optimized;
 
     if (program->size == before_size) {
       break;
     }
   }
 
-   optimize_offsets(&optimized, program);
-   *program = optimized;
+  //  optimize_offsets(&optimized, program);
+  //  *program = optimized;
 
-   optimize_transfer_offsets(&optimized, program);
-   *program = optimized;
+  //  optimize_transfer_offsets(&optimized, program);
+  //  *program = optimized;
 }
