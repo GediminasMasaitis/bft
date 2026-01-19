@@ -46,26 +46,26 @@ void merge_consecutive_right_inc(Program *output, const Program *input) {
 void create_zeroing_sets(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
 
-  addr_t in_index = 0;
-  for (addr_t out_index = 0; out_index < input->size; out_index++) {
-    Instruction instr = input->instructions[out_index];
+  addr_t out_index = 0;
+  for (addr_t in_index = 0; in_index < input->size; in_index++) {
+    Instruction instr = input->instructions[in_index];
     if (instr.op == OP_LOOP &&
-      out_index + 2 < input->size &&
-          input->instructions[out_index + 1].op == OP_INC &&
-          (input->instructions[out_index + 1].arg == 1 ||
-           input->instructions[out_index + 1].arg == -1) &&
-          input->instructions[out_index + 2].op == OP_END) {
-        output->instructions[in_index].op = OP_SET;
-        output->instructions[in_index].arg = 0; // value
-        output->instructions[in_index].arg2 = 1; // count
-        out_index += 2;
+      in_index + 2 < input->size &&
+          input->instructions[in_index + 1].op == OP_INC &&
+          (input->instructions[in_index + 1].arg == 1 ||
+           input->instructions[in_index + 1].arg == -1) &&
+          input->instructions[in_index + 2].op == OP_END) {
+        output->instructions[out_index].op = OP_SET;
+        output->instructions[out_index].arg = 0; // value
+        output->instructions[out_index].arg2 = 1; // count
+        in_index += 2;
     } else {
-      output->instructions[in_index] = instr;
+      output->instructions[out_index] = instr;
     }
-    in_index++;
+    out_index++;
   }
 
-  output->size = in_index;
+  output->size = out_index;
   program_calculate_loops(output);
 }
 
