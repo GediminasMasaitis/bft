@@ -144,11 +144,7 @@ void codegen_nasm(const Program *program, FILE *output) {
         fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
       }
       fprintf(output, "    test al, al\n");
-      if (instr->arg2 == 0) {
-        fprintf(output, "    jz .transfer_done_%d\n", i);
-      } else {
-        fprintf(output, "    jz .transfer_set_%d\n", i);
-      }
+      fprintf(output, "    jz .transfer_done_%d\n", i);
 
       for (int t = 0; t < instr->arg; t++) {
         i32 offset = instr->targets[t].offset;
@@ -162,32 +158,27 @@ void codegen_nasm(const Program *program, FILE *output) {
           fprintf(output, "    mov cl, %d\n", factor);
           fprintf(output, "    imul cl\n");
           fprintf(output, "    add byte [rbx%+d], al\n", offset);
-          if (instr->offset == 0) {
-            fprintf(output, "    movzx eax, byte [rbx]\n");
-          } else {
-            fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+          if (t < instr->arg - 1) {
+            if (instr->offset == 0) {
+              fprintf(output, "    movzx eax, byte [rbx]\n");
+            } else {
+              fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+            }
           }
         } else {
           fprintf(output, "    mov cl, %d\n", -factor);
           fprintf(output, "    imul cl\n");
           fprintf(output, "    sub byte [rbx%+d], al\n", offset);
-          if (instr->offset == 0) {
-            fprintf(output, "    movzx eax, byte [rbx]\n");
-          } else {
-            fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+          if (t < instr->arg - 1) {
+            if (instr->offset == 0) {
+              fprintf(output, "    movzx eax, byte [rbx]\n");
+            } else {
+              fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+            }
           }
         }
       }
 
-      if (instr->arg2 != 0) {
-        fprintf(output, ".transfer_set_%d:\n", i);
-      }
-      if (instr->offset == 0) {
-        fprintf(output, "    mov byte [rbx], %d\n", instr->arg2);
-      } else {
-        fprintf(output, "    mov byte [rbx%+d], %d\n", instr->offset,
-                instr->arg2);
-      }
       fprintf(output, ".transfer_done_%d:\n", i);
       break;
 

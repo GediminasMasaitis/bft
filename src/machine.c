@@ -181,7 +181,6 @@ status_t machine_run(Machine *machine) {
         cell_t *dst = &machine->cells[machine->dp + offset];
         *dst = (cell_t)(*dst + (cell_t)(v * (cell_t)factor));
       }
-      *src = instr->arg2;
       break;
     }
 

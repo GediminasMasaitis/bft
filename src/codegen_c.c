@@ -78,9 +78,8 @@ void codegen_c(const Program *program, FILE *output) {
   if (needs_transfer) {
     fprintf(output,
             "static void transfer(unsigned char *dp, const int src_offset, "
-            "const int dst_offset, const int factor, const int final_val) {\n");
+            "const int dst_offset, const int factor) {\n");
     fprintf(output, "  dp[dst_offset] += dp[src_offset] * factor;\n");
-    fprintf(output, "  dp[src_offset] = final_val;\n");
     fprintf(output, "}\n");
     fprintf(output, "\n");
   }
@@ -88,11 +87,10 @@ void codegen_c(const Program *program, FILE *output) {
   if (needs_transfer_multiple) {
     fprintf(output, "static void transfer_multiple(unsigned char *dp, const "
                     "int src_offset, const int count, const int dst_offsets[], "
-                    "const int factors[], const int final_val) {\n");
+                    "const int factors[]) {\n");
     fprintf(output, "  for (int i = 0; i < count; i++) {\n");
     fprintf(output, "    dp[dst_offsets[i]] += dp[src_offset] * factors[i];\n");
     fprintf(output, "  }\n");
-    fprintf(output, "  dp[src_offset] = final_val;\n");
     fprintf(output, "}\n");
     fprintf(output, "\n");
   }
@@ -223,9 +221,8 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
       if (instr->arg == 1) {
-        fprintf(output, "transfer(dp, %d, %d, %d, %d);\n", instr->offset,
-                instr->targets[0].offset, instr->targets[0].factor,
-                instr->arg2);
+        fprintf(output, "transfer(dp, %d, %d, %d);\n", instr->offset,
+                instr->targets[0].offset, instr->targets[0].factor);
       } else {
         fprintf(output, "transfer_multiple(dp, %d, %d, (int[]){", instr->offset,
                 instr->arg);
@@ -242,7 +239,7 @@ void codegen_c(const Program *program, FILE *output) {
           if (transfer_index < instr->arg - 1)
             fprintf(output, ", ");
         }
-        fprintf(output, "}, %d);\n", instr->arg2);
+        fprintf(output, "});\n");
       }
       break;
 

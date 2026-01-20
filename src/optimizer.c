@@ -272,90 +272,24 @@ void optimize_multi_transfer(Program *output, const Program *input) {
         for (int t = 0; t < num_targets; t++) {
           output->instructions[out_index].targets[t] = targets[t];
         }
+        out_index++;
+
+        // Emit separate SET instruction to zero the source cell
+        output->instructions[out_index].op = OP_SET;
+        output->instructions[out_index].arg = 0;   // value
+        output->instructions[out_index].arg2 = 1;  // count
+        output->instructions[out_index].offset = 0;
+        out_index++;
 
         addr_t loop_len = get_loop_length(input, i);
         i += loop_len - 1;
 
-        out_index++;
         continue;
       }
     }
 
     output->instructions[out_index] = input->instructions[i];
     out_index++;
-  }
-
-  output->size = out_index;
-  program_calculate_loops(output);
-}
-
-void optimize_transfer_inc(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-  addr_t out_index = 0;
-
-  for (addr_t i = 0; i < input->size; i++) {
-    const Instruction *curr = &input->instructions[i];
-
-    if (curr->op == OP_TRANSFER) {
-      i32 final_value = curr->arg2;
-      i32 src_offset = curr->offset; /* Transfer's source offset */
-      addr_t j = i + 1;
-
-      while (j < input->size) {
-        const Instruction *next = &input->instructions[j];
-
-        /* Only merge INC if it targets the same cell as the transfer's source
-         */
-        if (next->op == OP_INC && next->offset == src_offset) {
-          final_value += next->arg;
-          j++;
-          continue;
-        }
-
-        // do explici srt merge pass?
-        if (next->op == OP_SET && next->offset == src_offset) {
-          break;
-        }
-
-        if (next->op == OP_LOOP || next->op == OP_END || next->op == OP_RIGHT ||
-            next->op == OP_SEEK_EMPTY || next->op == OP_TRANSFER ||
-            next->op == OP_IN || next->op == OP_OUT) {
-          break;
-        }
-
-        if ((next->op == OP_INC || next->op == OP_SET) &&
-            next->offset != src_offset) {
-
-          // Check if this INC/SET targets any of the TRANSFER's destination
-          // offsets If so, we cannot safely reorder it before the TRANSFER
-          int conflicts_with_target = 0;
-          for (int t = 0; t < curr->arg; t++) {
-            if (next->offset == curr->targets[t].offset) {
-              conflicts_with_target = 1;
-              break;
-            }
-          }
-          if (conflicts_with_target) {
-            break;
-          }
-
-          output->instructions[out_index++] = *next;
-          j++;
-          continue;
-        }
-
-        break;
-      }
-
-      output->instructions[out_index] = *curr;
-      output->instructions[out_index].arg2 = final_value;
-      out_index++;
-
-      i = j - 1;
-      continue;
-    }
-
-    output->instructions[out_index++] = *curr;
   }
 
   output->size = out_index;
@@ -589,9 +523,6 @@ void optimize_program(Program *program) {
     *program = optimized;
 
     optimize_multi_transfer(&optimized, program);
-    *program = optimized;
-
-    optimize_transfer_inc(&optimized, program);
     *program = optimized;
 
     optimize_set_inc_merge(&optimized, program);
