@@ -338,7 +338,7 @@ void optimize_transfer_inc(Program *output, const Program *input) {
           if (conflicts_with_target) {
             break;
           }
-          
+
           output->instructions[out_index++] = *next;
           j++;
           continue;
@@ -388,19 +388,6 @@ void optimize_offsets(Program *output, const Program *original) {
     case OP_LOOP:
     case OP_END:
     case OP_SEEK_EMPTY:
-      if (virtual_offset != 0) {
-        output->instructions[out_index].op = OP_RIGHT;
-        output->instructions[out_index].arg = virtual_offset;
-        output->instructions[out_index].offset = 0;
-        out_index++;
-        virtual_offset = 0;
-      }
-
-      output->instructions[out_index] = *instr;
-      output->instructions[out_index].offset = 0;
-      out_index++;
-      break;
-
     case OP_TRANSFER:
       if (virtual_offset != 0) {
         output->instructions[out_index].op = OP_RIGHT;
@@ -411,6 +398,9 @@ void optimize_offsets(Program *output, const Program *original) {
       }
 
       output->instructions[out_index] = *instr;
+      if (instr->op != OP_TRANSFER) {
+        output->instructions[out_index].offset = 0;
+      }
       out_index++;
       break;
 
@@ -617,6 +607,4 @@ void optimize_program(Program *program) {
       break;
     }
   }
-
-
 }

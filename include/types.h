@@ -23,7 +23,7 @@ typedef enum {
   OP_SET = 'S',
   // arg1: value
   // arg2: count
-  // offset: offset from data pointer 
+  // offset: offset from data pointer
 
   OP_SEEK_EMPTY = 'E',
   OP_TRANSFER = 'T'
