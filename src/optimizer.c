@@ -552,6 +552,35 @@ void eliminate_dead_stores(Program* output, const Program* input) {
     program_calculate_loops(output);
 }
 
+// When arg2=1 on TRANSFER, it means assign not add
+void optimize_set_transfer_merge(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
+
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
+
+    if (curr->op == OP_SET && curr->arg == 0 && curr->arg2 == 1 &&
+        i + 1 < input->size) {
+      const Instruction *next = &input->instructions[i + 1];
+
+      if (next->op == OP_TRANSFER && next->arg == 1 &&
+          next->targets[0].offset == curr->offset) {
+        output->instructions[out_index] = *next;
+        output->instructions[out_index].arg2 = 1;
+        out_index++;
+        i++;
+        continue;
+      }
+    }
+
+    output->instructions[out_index++] = *curr;
+  }
+
+  output->size = out_index;
+  program_calculate_loops(output);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -584,6 +613,9 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     eliminate_dead_stores(optimized, program);
+    *program = *optimized;
+
+    optimize_set_transfer_merge(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;

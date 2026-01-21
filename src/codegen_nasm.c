@@ -155,43 +155,65 @@ void codegen_nasm(const Program *program, FILE *output) {
       } else {
         fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
       }
-      fprintf(output, "    test al, al\n");
-      fprintf(output, "    jz .transfer_done_%d\n", i);
 
-      for (int t = 0; t < instr->arg; t++) {
-        i32 offset = instr->targets[t].offset;
-        i32 factor = instr->targets[t].factor;
+      if (instr->arg2 == 1 && instr->arg == 1) {
+        i32 offset = instr->targets[0].offset;
+        i32 factor = instr->targets[0].factor;
 
         if (factor == 1) {
-          fprintf(output, "    add byte [rbx%+d], al\n", offset);
+          fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         } else if (factor == -1) {
-          fprintf(output, "    sub byte [rbx%+d], al\n", offset);
+          fprintf(output, "    neg al\n");
+          fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         } else if (factor > 0) {
           fprintf(output, "    mov cl, %d\n", factor);
           fprintf(output, "    imul cl\n");
-          fprintf(output, "    add byte [rbx%+d], al\n", offset);
-          if (t < instr->arg - 1) {
-            if (instr->offset == 0) {
-              fprintf(output, "    movzx eax, byte [rbx]\n");
-            } else {
-              fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
-            }
-          }
+          fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         } else {
           fprintf(output, "    mov cl, %d\n", -factor);
           fprintf(output, "    imul cl\n");
-          fprintf(output, "    sub byte [rbx%+d], al\n", offset);
-          if (t < instr->arg - 1) {
-            if (instr->offset == 0) {
-              fprintf(output, "    movzx eax, byte [rbx]\n");
-            } else {
-              fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+          fprintf(output, "    neg al\n");
+          fprintf(output, "    mov byte [rbx%+d], al\n", offset);
+        }
+      } else {
+        fprintf(output, "    test al, al\n");
+        fprintf(output, "    jz .transfer_done_%d\n", i);
+
+        for (int t = 0; t < instr->arg; t++) {
+          i32 offset = instr->targets[t].offset;
+          i32 factor = instr->targets[t].factor;
+
+          if (factor == 1) {
+            fprintf(output, "    add byte [rbx%+d], al\n", offset);
+          } else if (factor == -1) {
+            fprintf(output, "    sub byte [rbx%+d], al\n", offset);
+          } else if (factor > 0) {
+            fprintf(output, "    mov cl, %d\n", factor);
+            fprintf(output, "    imul cl\n");
+            fprintf(output, "    add byte [rbx%+d], al\n", offset);
+            if (t < instr->arg - 1) {
+              if (instr->offset == 0) {
+                fprintf(output, "    movzx eax, byte [rbx]\n");
+              } else {
+                fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+              }
+            }
+          } else {
+            fprintf(output, "    mov cl, %d\n", -factor);
+            fprintf(output, "    imul cl\n");
+            fprintf(output, "    sub byte [rbx%+d], al\n", offset);
+            if (t < instr->arg - 1) {
+              if (instr->offset == 0) {
+                fprintf(output, "    movzx eax, byte [rbx]\n");
+              } else {
+                fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+              }
             }
           }
         }
-      }
 
-      fprintf(output, ".transfer_done_%d:\n", i);
+        fprintf(output, ".transfer_done_%d:\n", i);
+      }
       break;
 
     default:

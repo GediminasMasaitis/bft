@@ -204,15 +204,31 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
       if (instr->arg == 1) {
-        char factor_sign = instr->targets[0].factor >= 0 ? '+' : '-';
-        int factor_abs = abs(instr->targets[0].factor);
+        int is_assignment = instr->arg2 == 1;
+        int factor = instr->targets[0].factor;
+        int factor_abs = abs(factor);
 
-        fprintf(output, "dp[%d] %c= dp[%d]", instr->targets[0].offset,
-                factor_sign, instr->offset);
-        if (factor_abs != 1) {
-          fprintf(output, " * %d", factor_abs);
+        if (is_assignment) {
+          fprintf(output, "dp[%d] = ", instr->targets[0].offset);
+          if (factor == -1) {
+            fprintf(output, "-dp[%d]", instr->offset);
+          } else if (factor_abs == 1) {
+            fprintf(output, "dp[%d]", instr->offset);
+          } else if (factor < 0) {
+            fprintf(output, "-dp[%d] * %d", instr->offset, factor_abs);
+          } else {
+            fprintf(output, "dp[%d] * %d", instr->offset, factor);
+          }
+          fprintf(output, ";\n");
+        } else {
+          char factor_sign = factor >= 0 ? '+' : '-';
+          fprintf(output, "dp[%d] %c= dp[%d]", instr->targets[0].offset,
+                  factor_sign, instr->offset);
+          if (factor_abs != 1) {
+            fprintf(output, " * %d", factor_abs);
+          }
+          fprintf(output, ";\n");
         }
-        fprintf(output, ";\n");
       } else {
         fprintf(output, "copy_multiple(dp, %d, %d, (int[]){", instr->offset,
                 instr->arg);
