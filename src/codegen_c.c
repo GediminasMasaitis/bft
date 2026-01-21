@@ -9,18 +9,6 @@ static void print_c_indent(FILE *output, int level) {
   }
 }
 
-static void print_c_right_increment(FILE *output, i32 arg) {
-  if (arg == 1) {
-    fprintf(output, "dp++");
-  } else if (arg == -1) {
-    fprintf(output, "dp--");
-  } else if (arg > 0) {
-    fprintf(output, "dp += %d", arg);
-  } else {
-    fprintf(output, "dp -= %d", -arg);
-  }
-}
-
 void codegen_c(const Program *program, FILE *output) {
   int *skip = calloc(program->size, sizeof(int));
   if (!skip) {
@@ -152,7 +140,15 @@ void codegen_c(const Program *program, FILE *output) {
           } else {
             fprintf(output, "for (; *dp != 0; ");
           }
-          print_c_right_increment(output, right_instr->arg);
+          if (right_instr->arg == 1) {
+            fprintf(output, "dp++");
+          } else if (right_instr->arg == -1) {
+            fprintf(output, "dp--");
+          } else if (right_instr->arg > 0) {
+            fprintf(output, "dp += %d", right_instr->arg);
+          } else {
+            fprintf(output, "dp -= %d", -right_instr->arg);
+          }
           fprintf(output, ") {\n");
         } else {
           fprintf(output, "while (*dp != 0) {\n");
