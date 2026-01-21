@@ -528,6 +528,30 @@ void optimize_offsets(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
+void eliminate_dead_stores(Program* output, const Program* input) {
+    memset(output, 0, sizeof(*output));
+    addr_t out_index = 0;
+
+    for (addr_t i = 0; i < input->size; i++) {
+        const Instruction* curr = &input->instructions[i];
+
+        if ((curr->op == OP_INC || curr->op == OP_SET) &&
+            i + 1 < input->size) {
+            const Instruction* next = &input->instructions[i + 1];
+            if (next->op == OP_SET &&
+                next->offset == curr->offset &&
+                next->arg2 == 1) {
+                continue;
+            }
+        }
+
+        output->instructions[out_index++] = *curr;
+    }
+
+    output->size = out_index;
+    program_calculate_loops(output);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -557,6 +581,9 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_offsets(optimized, program);
+    *program = *optimized;
+
+    eliminate_dead_stores(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
