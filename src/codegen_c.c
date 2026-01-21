@@ -42,14 +42,11 @@ void codegen_c(const Program *program, FILE *output) {
     }
   }
 
-  int needs_seek_empty = 0;
   int needs_transfer_multiple = 0;
 
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
-    if (instr->op == OP_SEEK_EMPTY) {
-      needs_seek_empty = 1;
-    } else if (instr->op == OP_TRANSFER && instr->arg > 1) {
+    if (instr->op == OP_TRANSFER && instr->arg > 1) {
       needs_transfer_multiple = 1;
     }
   }
@@ -61,14 +58,6 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "\n");
   fprintf(output, "static unsigned char cells[CELL_COUNT];\n");
   fprintf(output, "\n");
-
-  if (needs_seek_empty) {
-    fprintf(output,
-            "static void seek_empty(unsigned char **dp, const int step) {\n");
-    fprintf(output, "  while (**dp != 0) *dp += step;\n");
-    fprintf(output, "}\n");
-    fprintf(output, "\n");
-  }
 
   if (needs_transfer_multiple) {
     fprintf(output, "static void copy_multiple(unsigned char *dp, const "
@@ -201,7 +190,10 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_SEEK_EMPTY:
       print_c_indent(output, indent_level);
-      fprintf(output, "seek_empty(&dp, %d);\n", instr->arg);
+      char sign = instr->arg >= 0 ? '+' : '-';
+      int step_abs = abs(instr->arg);
+      fprintf(output, "while (*dp != 0) dp %c= %d; // seek empty cell\n", sign, step_abs);
+      
       break;
 
     case OP_TRANSFER:

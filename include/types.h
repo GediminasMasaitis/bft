@@ -20,7 +20,7 @@ typedef enum {
 
   // Extended
 
-  OP_SET = 'S',
+  OP_SET = '=',
   // arg1: value
   // arg2: count
   // offset: offset from data pointer
