@@ -209,8 +209,9 @@ void codegen_c(const Program *program, FILE *output) {
       if (instr->arg == 1) {
         char factor_sign = instr->targets[0].factor >= 0 ? '+' : '-';
         int factor_abs = abs(instr->targets[0].factor);
-        
-        fprintf(output, "dp[%d] %c= dp[%d]", instr->targets[0].offset, factor_sign, instr->offset);
+
+        fprintf(output, "dp[%d] %c= dp[%d]", instr->targets[0].offset,
+                factor_sign, instr->offset);
         if (factor_abs != 1) {
           fprintf(output, " * %d", factor_abs);
         }

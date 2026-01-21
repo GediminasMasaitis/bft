@@ -297,65 +297,6 @@ void optimize_multi_transfer(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-void optimize_offsets(Program *output, const Program *original) {
-  memset(output, 0, sizeof(*output));
-
-  addr_t out_index = 0;
-  i32 virtual_offset = 0;
-
-  for (addr_t i = 0; i < original->size; i++) {
-    const Instruction *instr = &original->instructions[i];
-
-    switch (instr->op) {
-    case OP_RIGHT:
-      virtual_offset += instr->arg;
-      break;
-
-    case OP_INC:
-    case OP_SET:
-    case OP_OUT:
-    case OP_IN:
-      output->instructions[out_index] = *instr;
-      output->instructions[out_index].offset = instr->offset + virtual_offset;
-      out_index++;
-      break;
-
-    case OP_LOOP:
-    case OP_END:
-    case OP_SEEK_EMPTY:
-    case OP_TRANSFER:
-      if (virtual_offset != 0) {
-        output->instructions[out_index].op = OP_RIGHT;
-        output->instructions[out_index].arg = virtual_offset;
-        output->instructions[out_index].offset = 0;
-        out_index++;
-        virtual_offset = 0;
-      }
-
-      output->instructions[out_index] = *instr;
-      if (instr->op != OP_TRANSFER) {
-        output->instructions[out_index].offset = 0;
-      }
-      out_index++;
-      break;
-
-    default:
-      output->instructions[out_index] = *instr;
-      out_index++;
-      break;
-    }
-  }
-
-  if (virtual_offset != 0) {
-    output->instructions[out_index].op = OP_RIGHT;
-    output->instructions[out_index].arg = virtual_offset;
-    out_index++;
-  }
-
-  output->size = out_index;
-  program_calculate_loops(output);
-}
-
 void optimize_set_inc_merge(Program *output, const Program *original) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
@@ -417,85 +358,63 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
-void optimize_transfer_offsets(Program *output, const Program *input) {
+void optimize_offsets(Program *output, const Program *original) {
   memset(output, 0, sizeof(*output));
+
   addr_t out_index = 0;
+  i32 virtual_offset = 0;
 
-  for (addr_t i = 0; i < input->size; i++) {
-    const Instruction *curr = &input->instructions[i];
-    if (curr->op == OP_RIGHT) {
-      i32 n = curr->arg;
-      addr_t transfer_idx = 0;
-      for (addr_t j = i + 1; j < input->size; j++) {
-        if (input->instructions[j].op == OP_TRANSFER) {
-          transfer_idx = j;
-          break;
-        }
+  for (addr_t i = 0; i < original->size; i++) {
+    const Instruction *instr = &original->instructions[i];
 
-        if (input->instructions[j].op == OP_RIGHT ||
-            input->instructions[j].op == OP_LOOP ||
-            input->instructions[j].op == OP_END ||
-            input->instructions[j].op == OP_SEEK_EMPTY) {
-          break;
-        }
-      }
+    switch (instr->op) {
+    case OP_RIGHT:
+      virtual_offset += instr->arg;
+      break;
 
-      if (transfer_idx > 0) {
-        addr_t right_idx = 0;
-        for (addr_t j = transfer_idx + 1; j < input->size; j++) {
-          if (input->instructions[j].op == OP_RIGHT) {
-            right_idx = j;
-            break;
-          }
+    case OP_INC:
+    case OP_SET:
+    case OP_OUT:
+    case OP_IN:
+    case OP_TRANSFER:
+      output->instructions[out_index] = *instr;
+      output->instructions[out_index].offset = instr->offset + virtual_offset;
 
-          if (input->instructions[j].op == OP_LOOP ||
-              input->instructions[j].op == OP_END ||
-              input->instructions[j].op == OP_TRANSFER ||
-              input->instructions[j].op == OP_SEEK_EMPTY) {
-            break;
-          }
-        }
-
-        if (right_idx > 0) {
-          i32 m = input->instructions[right_idx].arg;
-          const Instruction *transfer = &input->instructions[transfer_idx];
-
-          for (addr_t j = i + 1; j < transfer_idx; j++) {
-            Instruction adjusted = input->instructions[j];
-            adjusted.offset += n;
-            output->instructions[out_index++] = adjusted;
-          }
-
-          Instruction new_transfer = *transfer;
-          new_transfer.offset = n;
-
-          for (int t = 0; t < new_transfer.arg; t++) {
-            new_transfer.targets[t].offset += n;
-          }
-
-          output->instructions[out_index++] = new_transfer;
-
-          for (addr_t j = transfer_idx + 1; j < right_idx; j++) {
-            Instruction adjusted = input->instructions[j];
-            adjusted.offset += n;
-            output->instructions[out_index++] = adjusted;
-          }
-
-          if (n + m != 0) {
-            Instruction right;
-            memset(&right, 0, sizeof(right));
-            right.op = OP_RIGHT;
-            right.arg = n + m;
-            output->instructions[out_index++] = right;
-          }
-
-          i = right_idx;
-          continue;
+      if (instr->op == OP_TRANSFER) {
+        for (int t = 0; t < instr->arg; t++) {
+          output->instructions[out_index].targets[t].offset += virtual_offset;
         }
       }
+
+      out_index++;
+      break;
+
+    case OP_LOOP:
+    case OP_END:
+    case OP_SEEK_EMPTY:
+      if (virtual_offset != 0) {
+        output->instructions[out_index].op = OP_RIGHT;
+        output->instructions[out_index].arg = virtual_offset;
+        output->instructions[out_index].offset = 0;
+        out_index++;
+        virtual_offset = 0;
+      }
+
+      output->instructions[out_index] = *instr;
+      out_index++;
+      break;
+
+    default:
+      perror("optimize_offsets: unknown instruction");
+      exit(1);
+      break;
     }
+  }
 
-    output->instructions[out_index++] = *curr;
+  if (virtual_offset != 0) {
+    output->instructions[out_index].op = OP_RIGHT;
+    output->instructions[out_index].arg = virtual_offset;
+    out_index++;
   }
 
   output->size = out_index;
@@ -531,9 +450,6 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_offsets(optimized, program);
-    *program = *optimized;
-
-    optimize_transfer_offsets(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
