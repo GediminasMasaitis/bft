@@ -43,19 +43,14 @@ void codegen_c(const Program *program, FILE *output) {
   }
 
   int needs_seek_empty = 0;
-  int needs_transfer = 0;
   int needs_transfer_multiple = 0;
 
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
     if (instr->op == OP_SEEK_EMPTY) {
       needs_seek_empty = 1;
-    } else if (instr->op == OP_TRANSFER) {
-      if (instr->arg == 1) {
-        needs_transfer = 1;
-      } else {
-        needs_transfer_multiple = 1;
-      }
+    } else if (instr->op == OP_TRANSFER && instr->arg > 1) {
+      needs_transfer_multiple = 1;
     }
   }
 
@@ -75,17 +70,8 @@ void codegen_c(const Program *program, FILE *output) {
     fprintf(output, "\n");
   }
 
-  if (needs_transfer) {
-    fprintf(output,
-            "static void transfer(unsigned char *dp, const int src_offset, "
-            "const int dst_offset, const int factor) {\n");
-    fprintf(output, "  dp[dst_offset] += dp[src_offset] * factor;\n");
-    fprintf(output, "}\n");
-    fprintf(output, "\n");
-  }
-
   if (needs_transfer_multiple) {
-    fprintf(output, "static void transfer_multiple(unsigned char *dp, const "
+    fprintf(output, "static void copy_multiple(unsigned char *dp, const "
                     "int src_offset, const int count, const int dst_offsets[], "
                     "const int factors[]) {\n");
     fprintf(output, "  for (int i = 0; i < count; i++) {\n");
@@ -221,10 +207,16 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
       if (instr->arg == 1) {
-        fprintf(output, "transfer(dp, %d, %d, %d);\n", instr->offset,
-                instr->targets[0].offset, instr->targets[0].factor);
+        char factor_sign = instr->targets[0].factor >= 0 ? '+' : '-';
+        int factor_abs = abs(instr->targets[0].factor);
+        
+        fprintf(output, "dp[%d] %c= dp[%d]", instr->targets[0].offset, factor_sign, instr->offset);
+        if (factor_abs != 1) {
+          fprintf(output, " * %d", factor_abs);
+        }
+        fprintf(output, ";\n");
       } else {
-        fprintf(output, "transfer_multiple(dp, %d, %d, (int[]){", instr->offset,
+        fprintf(output, "copy_multiple(dp, %d, %d, (int[]){", instr->offset,
                 instr->arg);
         for (int transfer_index = 0; transfer_index < instr->arg;
              transfer_index++) {
