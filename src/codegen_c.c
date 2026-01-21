@@ -133,7 +133,7 @@ void codegen_c(const Program *program, FILE *output) {
       print_c_indent(output, indent_level);
       {
         addr_t end_idx = instr->arg;
-        if (end_idx > 0 && skip[end_idx - 1]) {
+        if (end_idx > 0 && skip[end_idx - 1] && instr->offset == 0) {
           const Instruction *right_instr = &program->instructions[end_idx - 1];
           if (i > 0 && skip[i - 1] &&
               program->instructions[i - 1].offset == 0) {
@@ -152,8 +152,10 @@ void codegen_c(const Program *program, FILE *output) {
             fprintf(output, "dp -= %d", -right_instr->arg);
           }
           fprintf(output, ") {\n");
-        } else {
+        } else if (instr->offset == 0) {
           fprintf(output, "while (*dp != 0) {\n");
+        } else {
+          fprintf(output, "while (dp[%d] != 0) {\n", instr->offset);
         }
       }
       indent_level++;

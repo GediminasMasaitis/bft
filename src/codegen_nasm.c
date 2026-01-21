@@ -85,12 +85,20 @@ void codegen_nasm(const Program *program, FILE *output) {
 
     case OP_LOOP:
       fprintf(output, ".loop%d_start:\n", i);
-      fprintf(output, "    cmp byte [rbx], 0\n");
+      if (instr->offset == 0) {
+        fprintf(output, "    cmp byte [rbx], 0\n");
+      } else {
+        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->offset);
+      }
       fprintf(output, "    je .loop%d_end\n", i);
       break;
 
     case OP_END:
-      fprintf(output, "    cmp byte [rbx], 0\n");
+      if (instr->offset == 0) {
+        fprintf(output, "    cmp byte [rbx], 0\n");
+      } else {
+        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->offset);
+      }
       fprintf(output, "    jne .loop%d_start\n", instr->arg);
       fprintf(output, ".loop%d_end:\n", instr->arg);
       break;

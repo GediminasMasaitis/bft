@@ -145,13 +145,13 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_LOOP:
-      if (*cell == 0) {
+      if (machine->cells[machine->dp + instr->offset] == 0) {
         machine->ip = instr->arg;
       }
       break;
 
     case OP_END:
-      if (*cell != 0) {
+      if (machine->cells[machine->dp + instr->offset] != 0) {
         machine->ip = instr->arg;
       }
       break;

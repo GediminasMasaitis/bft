@@ -358,11 +358,76 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
+static int analyze_loop_balance(const Program *program, addr_t loop_start, i32 *net_movement) {
+  if (program->instructions[loop_start].op != OP_LOOP) {
+    return 0;
+  }
+
+  i32 movement = 0;
+  i32 depth = 1;
+  addr_t i = loop_start + 1;
+
+  while (i < program->size && depth > 0) {
+    const Instruction *instr = &program->instructions[i];
+
+    switch (instr->op) {
+    case OP_RIGHT:
+      movement += instr->arg;
+      break;
+
+    case OP_LOOP:
+      depth++;
+      i32 child_move;
+      const i32 child_movable = analyze_loop_balance(program, i, &child_move);
+      if (!child_movable) {
+        return 0;
+      }
+
+      if (child_move != 0) {
+        return 0;
+      }
+      break;
+
+    case OP_END:
+      depth--;
+      break;
+
+    case OP_INC:
+    case OP_SET:
+    case OP_OUT:
+    case OP_IN:
+    case OP_TRANSFER:
+      // Donesn't affect pointer position
+      break;
+
+    case OP_SEEK_EMPTY:
+      // Moves pointer unpredictably
+      return 0;
+
+    default:
+      return 0;
+    }
+    i++;
+  }
+
+  if (depth != 0) {
+    fprintf(stderr, "Unmatched loop at instruction %u\n", loop_start);
+    exit(1);
+    return 0;
+  }
+
+  *net_movement = movement;
+  return 1;
+}
+
 void optimize_offsets(Program *output, const Program *original) {
   memset(output, 0, sizeof(*output));
 
   addr_t out_index = 0;
   i32 virtual_offset = 0;
+
+  i32 loop_entry_offsets[MAX_CODE_SIZE];
+  int loop_stack_size = 0;
 
   for (addr_t i = 0; i < original->size; i++) {
     const Instruction *instr = &original->instructions[i];
@@ -390,19 +455,61 @@ void optimize_offsets(Program *output, const Program *original) {
       out_index++;
       break;
 
-    case OP_LOOP:
-    case OP_END:
-      if (virtual_offset != 0) {
-        output->instructions[out_index].op = OP_RIGHT;
-        output->instructions[out_index].arg = virtual_offset;
-        output->instructions[out_index].offset = 0;
-        out_index++;
-        virtual_offset = 0;
-      }
+    case OP_LOOP: {
+      i32 net_movement;
+      int is_balanced =
+          analyze_loop_balance(original, i, &net_movement) && net_movement == 0;
 
-      output->instructions[out_index] = *instr;
-      out_index++;
+      if (is_balanced) {
+        i32 combined_offset = instr->offset + virtual_offset;
+        loop_entry_offsets[loop_stack_size++] = virtual_offset;
+
+        output->instructions[out_index] = *instr;
+        output->instructions[out_index].offset = combined_offset;
+        out_index++;
+      } else {
+        if (virtual_offset != 0) {
+          output->instructions[out_index].op = OP_RIGHT;
+          output->instructions[out_index].arg = virtual_offset;
+          output->instructions[out_index].offset = 0;
+          out_index++;
+          virtual_offset = 0;
+        }
+
+        loop_entry_offsets[loop_stack_size++] = -999999;
+
+        output->instructions[out_index] = *instr;
+        output->instructions[out_index].offset = instr->offset;
+        out_index++;
+      }
       break;
+    }
+
+    case OP_END: {
+      i32 entry_virtual_offset = loop_entry_offsets[--loop_stack_size];
+
+      if (entry_virtual_offset == -999999) {
+        if (virtual_offset != 0) {
+          output->instructions[out_index].op = OP_RIGHT;
+          output->instructions[out_index].arg = virtual_offset;
+          output->instructions[out_index].offset = 0;
+          out_index++;
+          virtual_offset = 0;
+        }
+
+        output->instructions[out_index] = *instr;
+        output->instructions[out_index].offset = instr->offset;
+        out_index++;
+      } else {
+        i32 combined_offset = instr->offset + entry_virtual_offset;
+        virtual_offset = entry_virtual_offset;
+
+        output->instructions[out_index] = *instr;
+        output->instructions[out_index].offset = combined_offset;
+        out_index++;
+      }
+      break;
+    }
 
     default:
       perror("optimize_offsets: unknown instruction");
