@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "machine.h"
@@ -17,7 +19,6 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
       while (in_index + 1 < input->size) {
         const Instruction *next = &input->instructions[in_index + 1];
 
-        // Only merge if same op AND same offset
         if (next->op != instr.op || next->offset != offset) {
           break;
         }
@@ -260,10 +261,10 @@ void optimize_multi_transfer(Program *output, const Program *input) {
 
   addr_t out_index = 0;
 
-  for (addr_t i = 0; i < input->size; i++) {
-    if (input->instructions[i].op == OP_LOOP) {
+  for (addr_t in_index = 0; in_index < input->size; in_index++) {
+    if (input->instructions[in_index].op == OP_LOOP) {
       TransferTarget targets[MAX_TRANSFER_TARGETS];
-      int num_targets = analyze_multi_transfer(input, i, targets);
+      int num_targets = analyze_multi_transfer(input, in_index, targets);
 
       if (num_targets > 0) {
         output->instructions[out_index].op = OP_TRANSFER;
@@ -276,19 +277,19 @@ void optimize_multi_transfer(Program *output, const Program *input) {
 
         // Emit separate SET instruction to zero the source cell
         output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = 0;   // value
-        output->instructions[out_index].arg2 = 1;  // count
+        output->instructions[out_index].arg = 0;  // value
+        output->instructions[out_index].arg2 = 1; // count
         output->instructions[out_index].offset = 0;
         out_index++;
 
-        addr_t loop_len = get_loop_length(input, i);
-        i += loop_len - 1;
+        addr_t loop_len = get_loop_length(input, in_index);
+        in_index += loop_len - 1;
 
         continue;
       }
     }
 
-    output->instructions[out_index] = input->instructions[i];
+    output->instructions[out_index] = input->instructions[in_index];
     out_index++;
   }
 
@@ -502,40 +503,45 @@ void optimize_transfer_offsets(Program *output, const Program *input) {
 }
 
 void optimize_program(Program *program) {
-  Program optimized;
+  Program *optimized = malloc(sizeof(Program));
+  Program *before_pass = malloc(sizeof(Program));
 
-  while (1) {
-    addr_t before_size = program->size;
+  for (int iteration = 0; iteration < 10; iteration++) {
+    memcpy(before_pass, program, sizeof(Program));
 
-    merge_consecutive_right_inc(&optimized, program, OP_RIGHT);
-    *program = optimized;
+    merge_consecutive_right_inc(optimized, program, OP_RIGHT);
+    *program = *optimized;
 
-    merge_consecutive_right_inc(&optimized, program, OP_INC);
-    *program = optimized;
+    merge_consecutive_right_inc(optimized, program, OP_INC);
+    *program = *optimized;
 
-    create_zeroing_sets(&optimized, program);
-    *program = optimized;
+    create_zeroing_sets(optimized, program);
+    *program = *optimized;
 
-    optimize_memset(&optimized, program);
-    *program = optimized;
+    optimize_memset(optimized, program);
+    *program = *optimized;
 
-    optimize_seek_empty(&optimized, program);
-    *program = optimized;
+    optimize_seek_empty(optimized, program);
+    *program = *optimized;
 
-    optimize_multi_transfer(&optimized, program);
-    *program = optimized;
+    optimize_multi_transfer(optimized, program);
+    *program = *optimized;
 
-    optimize_set_inc_merge(&optimized, program);
-    *program = optimized;
+    optimize_set_inc_merge(optimized, program);
+    *program = *optimized;
 
-    optimize_offsets(&optimized, program);
-    *program = optimized;
+    optimize_offsets(optimized, program);
+    *program = *optimized;
 
-    optimize_transfer_offsets(&optimized, program);
-    *program = optimized;
+    optimize_transfer_offsets(optimized, program);
+    *program = *optimized;
 
-    if (program->size == before_size) {
+    const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
+    if (!changed) {
       break;
     }
   }
+
+  free(optimized);
+  free(before_pass);
 }

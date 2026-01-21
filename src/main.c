@@ -25,7 +25,7 @@ static void dump_instructions(const Program *program) {
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
 
-    printf("Instruction %d: %c %d", i, instr->op, instr->arg);
+    printf("Instruction %d: %c %d %d", i, instr->op, instr->arg, instr->arg2);
     if (instr->offset != 0) {
       printf(" @%d", instr->offset);
     }
