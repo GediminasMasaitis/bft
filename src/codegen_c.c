@@ -23,7 +23,8 @@ void codegen_c(const Program *program, FILE *output) {
       if (end_idx > 0 && program->instructions[end_idx - 1].op == OP_RIGHT) {
         skip[end_idx - 1] = 1;
         if (i > 0 && program->instructions[i - 1].op == OP_SET &&
-            program->instructions[i - 1].arg2 == 1) {
+            program->instructions[i - 1].arg2 == 1 &&
+            program->instructions[i - 1].offset == 0) {
           skip[i - 1] = 1;
         }
       }
@@ -134,7 +135,8 @@ void codegen_c(const Program *program, FILE *output) {
         addr_t end_idx = instr->arg;
         if (end_idx > 0 && skip[end_idx - 1]) {
           const Instruction *right_instr = &program->instructions[end_idx - 1];
-          if (i > 0 && skip[i - 1]) {
+          if (i > 0 && skip[i - 1] &&
+              program->instructions[i - 1].offset == 0) {
             const Instruction *set_instr = &program->instructions[i - 1];
             fprintf(output, "for (*dp = %d; *dp != 0; ", set_instr->arg);
           } else {
@@ -188,8 +190,13 @@ void codegen_c(const Program *program, FILE *output) {
       print_c_indent(output, indent_level);
       char sign = instr->arg >= 0 ? '+' : '-';
       int step_abs = abs(instr->arg);
-      fprintf(output, "while (*dp != 0) dp %c= %d; // seek empty cell\n", sign, step_abs);
-      
+      if (instr->offset == 0) {
+        fprintf(output, "while (*dp != 0) dp %c= %d; // seek empty\n", sign,
+                step_abs);
+      } else {
+        fprintf(output, "while (dp[%d] != 0) dp %c= %d; // seek empty\n",
+                instr->offset, sign, step_abs);
+      }
       break;
 
     case OP_TRANSFER:

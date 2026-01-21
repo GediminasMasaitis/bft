@@ -377,6 +377,7 @@ void optimize_offsets(Program *output, const Program *original) {
     case OP_OUT:
     case OP_IN:
     case OP_TRANSFER:
+    case OP_SEEK_EMPTY:
       output->instructions[out_index] = *instr;
       output->instructions[out_index].offset = instr->offset + virtual_offset;
 
@@ -391,7 +392,6 @@ void optimize_offsets(Program *output, const Program *original) {
 
     case OP_LOOP:
     case OP_END:
-    case OP_SEEK_EMPTY:
       if (virtual_offset != 0) {
         output->instructions[out_index].op = OP_RIGHT;
         output->instructions[out_index].arg = virtual_offset;

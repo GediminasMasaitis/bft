@@ -166,9 +166,8 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_SEEK_EMPTY:
-      while (*cell != 0) {
+      while (machine->cells[machine->dp + instr->offset] != 0) {
         machine->dp += instr->arg;
-        cell = &machine->cells[machine->dp];
       }
       break;
 
