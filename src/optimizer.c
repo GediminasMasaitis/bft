@@ -608,6 +608,17 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
           i++;
           continue;
         }
+
+        if (curr->offset == next->offset) {
+          output->instructions[out_index] = *next;
+          for (int t = 0; t < next->arg; t++) {
+            output->instructions[out_index].targets[t].bias +=
+                curr->arg * next->targets[t].factor;
+          }
+          out_index++;
+          i++;
+          continue;
+        }
       }
     }
 
