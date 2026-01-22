@@ -189,6 +189,19 @@ status_t machine_run(Machine *machine) {
       break;
     }
 
+    case OP_DIVMOD: {
+      cell_t *dividend = &machine->cells[machine->dp + instr->offset];
+      cell_t divisor = (cell_t)instr->arg;
+      cell_t *quotient = &machine->cells[machine->dp + instr->targets[0].offset];
+      cell_t *remainder = &machine->cells[machine->dp + instr->targets[0].factor];
+
+      cell_t div_val = *dividend;
+      *quotient += div_val / divisor;
+      *remainder = div_val % divisor;
+      *dividend = 0;
+      break;
+    }
+
     default:
       break;
     }

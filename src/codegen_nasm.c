@@ -244,6 +244,17 @@ void codegen_nasm(const Program *program, FILE *output) {
       }
       break;
 
+    case OP_DIVMOD:
+      fprintf(output, "    ; divmod by %d\n", instr->arg);
+      fprintf(output, "    movzx eax, byte [rbx%+d]  ; load dividend\n", instr->offset);
+      fprintf(output, "    xor edx, edx\n");
+      fprintf(output, "    mov cl, %d\n", instr->arg);
+      fprintf(output, "    div cl                    ; al = quotient, ah = remainder\n");
+      fprintf(output, "    add byte [rbx%+d], al     ; accumulate quotient\n", instr->targets[0].offset);
+      fprintf(output, "    mov byte [rbx%+d], ah     ; store remainder\n", instr->targets[0].factor);
+      fprintf(output, "    mov byte [rbx%+d], 0      ; clear dividend\n", instr->offset);
+      break;
+
     default:
       fprintf(output, "    ; UNKNOWN OP: %c\n", instr->op);
       break;

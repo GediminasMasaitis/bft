@@ -38,6 +38,10 @@ static void dump_instructions(const Program *program) {
         }
         printf(")");
       }
+    } else if (instr->op == OP_DIVMOD) {
+      printf(" ; divmod: dp[%d] / %d -> quot@%d rem@%d",
+             instr->offset, instr->arg,
+             instr->targets[0].offset, instr->targets[0].factor);
     }
     putchar('\n');
   }

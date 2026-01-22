@@ -399,11 +399,10 @@ static int analyze_loop_balance(const Program *program, addr_t loop_start,
     case OP_OUT:
     case OP_IN:
     case OP_TRANSFER:
-      // Donesn't affect pointer position
+    case OP_DIVMOD:
       break;
 
     case OP_SEEK_EMPTY:
-      // Moves pointer unpredictably
       return 0;
 
     default:
@@ -454,6 +453,16 @@ void optimize_offsets(Program *output, const Program *original) {
         }
       }
 
+      out_index++;
+      break;
+
+    case OP_DIVMOD:
+      output->instructions[out_index] = *instr;
+      output->instructions[out_index].offset = instr->offset + virtual_offset;
+      // targets[0].offset is quotient, targets[0].factor is remainder
+      output->instructions[out_index].targets[0].offset += virtual_offset;
+      output->instructions[out_index].targets[0].factor += virtual_offset;
+      output->instructions[out_index].targets[0].bias += virtual_offset; // temp offset
       out_index++;
       break;
 
@@ -552,7 +561,6 @@ void eliminate_dead_stores(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-// When arg2=1 on TRANSFER, it means assign not add
 void optimize_set_transfer_merge(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
@@ -669,6 +677,118 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
+                                  i32 *dividend_off, i32 *divisor,
+                                  i32 *quotient_off, i32 *remainder_off,
+                                  i32 *temp_off) {
+  if (loop_start + 5 >= program->size) {
+    return 0;
+  }
+
+  const Instruction *loop_instr = &program->instructions[loop_start];
+  const Instruction *inc_instr = &program->instructions[loop_start + 1];
+  const Instruction *transfer1 = &program->instructions[loop_start + 2];
+  const Instruction *transfer2 = &program->instructions[loop_start + 3];
+  const Instruction *set_instr = &program->instructions[loop_start + 4];
+  const Instruction *end_instr = &program->instructions[loop_start + 5];
+
+  if (loop_instr->op != OP_LOOP) {
+    return 0;
+  }
+
+  if (end_instr->op != OP_END || end_instr->arg != (i32)loop_start) {
+    return 0;
+  }
+
+  if (end_instr->offset != loop_instr->offset) {
+    return 0;
+  }
+
+  if (inc_instr->op != OP_INC || inc_instr->arg != -1 ||
+      inc_instr->offset != loop_instr->offset) {
+    return 0;
+  }
+
+  if (transfer1->op != OP_TRANSFER || transfer1->arg != 2 ||
+      transfer1->arg2 != 0) {
+    return 0;
+  }
+
+  if (transfer1->targets[0].factor != -1) {
+    return 0;
+  }
+
+  if (transfer1->targets[1].factor != 1 || transfer1->targets[1].bias != 0) {
+    return 0;
+  }
+
+  if (transfer2->op != OP_TRANSFER || transfer2->arg != 1 ||
+      transfer2->arg2 != 1) {
+    return 0;
+  }
+
+  if (transfer2->offset != transfer1->targets[0].offset) {
+    return 0;
+  }
+
+  if (transfer2->targets[0].offset != transfer1->offset ||
+      transfer2->targets[0].factor != 1) {
+    return 0;
+  }
+
+  if (set_instr->op != OP_SET || set_instr->arg != 0 || set_instr->arg2 != 1) {
+    return 0;
+  }
+
+  if (set_instr->offset != transfer1->targets[0].offset) {
+    return 0;
+  }
+
+  *dividend_off = loop_instr->offset;
+  *divisor = transfer1->targets[0].bias + 1;
+  *quotient_off = transfer1->targets[1].offset;
+  *remainder_off = transfer1->offset;
+  *temp_off = transfer1->targets[0].offset;
+
+  if (*divisor < 2) {
+    return 0;
+  }
+
+  return 1;
+}
+
+void optimize_divmod(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
+
+  for (addr_t in_index = 0; in_index < input->size; in_index++) {
+    const Instruction *instr = &input->instructions[in_index];
+
+    if (instr->op == OP_LOOP) {
+      i32 dividend_off, divisor, quotient_off, remainder_off, temp_off;
+
+      if (analyze_divmod_pattern(input, in_index, &dividend_off, &divisor,
+                                 &quotient_off, &remainder_off, &temp_off)) {
+        output->instructions[out_index].op = OP_DIVMOD;
+        output->instructions[out_index].offset = dividend_off;
+        output->instructions[out_index].arg = divisor;
+        output->instructions[out_index].targets[0].offset = quotient_off;
+        output->instructions[out_index].targets[0].factor = remainder_off;
+        output->instructions[out_index].targets[0].bias = temp_off;
+        out_index++;
+        in_index += 5;
+        continue;
+      }
+    }
+
+    output->instructions[out_index] = *instr;
+    out_index++;
+  }
+
+  output->size = out_index;
+  program_calculate_loops(output);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -707,6 +827,9 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_inc_transfer_merge(optimized, program);
+    *program = *optimized;
+
+    optimize_divmod(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;

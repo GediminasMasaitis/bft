@@ -26,7 +26,8 @@ typedef enum {
   // offset: offset from data pointer
 
   OP_SEEK_EMPTY = 'E',
-  OP_TRANSFER = 'T'
+  OP_TRANSFER = 'T',
+  OP_DIVMOD = 'D'
 } OpCode;
 
 enum {

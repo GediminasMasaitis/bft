@@ -264,6 +264,42 @@ void codegen_c(const Program *program, FILE *output) {
       }
       break;
 
+    case OP_DIVMOD: {
+      i32 div_off = instr->offset;
+      i32 quot_off = instr->targets[0].offset;
+      i32 rem_off = instr->targets[0].factor;
+      i32 divisor = instr->arg;
+
+      int need_temp = (div_off == quot_off);
+
+      if (need_temp) {
+        print_c_indent(output, indent_level);
+        fprintf(output, "{ // divmod by %d\n", divisor);
+        indent_level++;
+        print_c_indent(output, indent_level);
+        fprintf(output, "unsigned char _t = dp[%d];\n", div_off);
+        print_c_indent(output, indent_level);
+        fprintf(output, "dp[%d] += _t / %d;\n", quot_off, divisor);
+        print_c_indent(output, indent_level);
+        fprintf(output, "dp[%d] = _t %% %d;\n", rem_off, divisor);
+        print_c_indent(output, indent_level);
+        fprintf(output, "dp[%d] = 0;\n", div_off);
+        indent_level--;
+        print_c_indent(output, indent_level);
+        fprintf(output, "}\n");
+      } else {
+        print_c_indent(output, indent_level);
+        fprintf(output, "// divmod by %d\n", divisor);
+        print_c_indent(output, indent_level);
+        fprintf(output, "dp[%d] += dp[%d] / %d;\n", quot_off, div_off, divisor);
+        print_c_indent(output, indent_level);
+        fprintf(output, "dp[%d] = dp[%d] %% %d;\n", rem_off, div_off, divisor);
+        print_c_indent(output, indent_level);
+        fprintf(output, "dp[%d] = 0;\n", div_off);
+      }
+      break;
+    }
+
     default:
       print_c_indent(output, indent_level);
       fprintf(output, "/* unknown op: %c */\n", instr->op);
