@@ -399,7 +399,8 @@ static int analyze_loop_balance(const Program *program, addr_t loop_start,
     case OP_OUT:
     case OP_IN:
     case OP_TRANSFER:
-    case OP_DIVMOD:
+    case OP_DIV:
+    case OP_MOD:
       break;
 
     case OP_SEEK_EMPTY:
@@ -456,13 +457,11 @@ void optimize_offsets(Program *output, const Program *original) {
       out_index++;
       break;
 
-    case OP_DIVMOD:
+    case OP_DIV:
+    case OP_MOD:
       output->instructions[out_index] = *instr;
       output->instructions[out_index].offset = instr->offset + virtual_offset;
-      // targets[0].offset is quotient, targets[0].factor is remainder
       output->instructions[out_index].targets[0].offset += virtual_offset;
-      output->instructions[out_index].targets[0].factor += virtual_offset;
-      output->instructions[out_index].targets[0].bias += virtual_offset; // temp offset
       out_index++;
       break;
 
@@ -539,6 +538,62 @@ void optimize_offsets(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
+static int is_cell_assignment(const Instruction *instr, i32 offset) {
+  if (instr->op == OP_SET && instr->arg2 == 1 && instr->offset == offset) {
+    return 1;
+  }
+  if (instr->op == OP_MOD && instr->targets[0].offset == offset) {
+    return 1;
+  }
+  if (instr->op == OP_TRANSFER && instr->arg2 == 1 && instr->arg == 1 &&
+      instr->targets[0].offset == offset) {
+    return 1;
+  }
+  return 0;
+}
+
+static int instruction_uses_cell(const Instruction *instr, i32 offset) {
+  switch (instr->op) {
+  case OP_INC:
+  case OP_OUT:
+    return instr->offset == offset;
+
+  case OP_SET:
+    if (instr->arg2 > 1) {
+      return offset >= instr->offset && offset < instr->offset + instr->arg2;
+    }
+    return 0;
+
+  case OP_IN:
+    return 0;
+
+  case OP_DIV:
+    return instr->offset == offset;
+
+  case OP_MOD:
+    
+    return instr->offset == offset;
+
+  case OP_TRANSFER:
+    if (instr->offset == offset) return 1;
+    if (instr->arg2 != 1) {
+      for (int t = 0; t < instr->arg; t++) {
+        if (instr->targets[t].offset == offset) return 1;
+      }
+    }
+    return 0;
+
+  case OP_LOOP:
+  case OP_END:
+  case OP_RIGHT:
+  case OP_SEEK_EMPTY:
+    return 1;
+
+  default:
+    return 1;
+  }
+}
+
 void eliminate_dead_stores(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
@@ -546,10 +601,24 @@ void eliminate_dead_stores(Program *output, const Program *input) {
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
 
-    if ((curr->op == OP_INC || curr->op == OP_SET) && i + 1 < input->size) {
-      const Instruction *next = &input->instructions[i + 1];
-      if (next->op == OP_SET && next->offset == curr->offset &&
-          next->arg2 == 1) {
+    if ((curr->op == OP_INC || (curr->op == OP_SET && curr->arg2 == 1))) {
+      i32 target_offset = curr->offset;
+      int is_dead = 0;
+
+      for (addr_t j = i + 1; j < input->size; j++) {
+        const Instruction *future = &input->instructions[j];
+
+        if (is_cell_assignment(future, target_offset)) {
+          is_dead = 1;
+          break;
+        }
+
+        if (instruction_uses_cell(future, target_offset)) {
+          break;
+        }
+      }
+
+      if (is_dead) {
         continue;
       }
     }
@@ -769,12 +838,16 @@ void optimize_divmod(Program *output, const Program *input) {
 
       if (analyze_divmod_pattern(input, in_index, &dividend_off, &divisor,
                                  &quotient_off, &remainder_off, &temp_off)) {
-        output->instructions[out_index].op = OP_DIVMOD;
+        output->instructions[out_index].op = OP_DIV;
         output->instructions[out_index].offset = dividend_off;
         output->instructions[out_index].arg = divisor;
         output->instructions[out_index].targets[0].offset = quotient_off;
-        output->instructions[out_index].targets[0].factor = remainder_off;
-        output->instructions[out_index].targets[0].bias = temp_off;
+        out_index++;
+
+        output->instructions[out_index].op = OP_MOD;
+        output->instructions[out_index].offset = dividend_off;
+        output->instructions[out_index].arg = divisor;
+        output->instructions[out_index].targets[0].offset = remainder_off;
         out_index++;
 
         output->instructions[out_index].op = OP_SET;
@@ -827,6 +900,9 @@ void optimize_program(Program *program) {
     optimize_offsets(optimized, program);
     *program = *optimized;
 
+    optimize_divmod(optimized, program);
+    *program = *optimized;
+
     eliminate_dead_stores(optimized, program);
     *program = *optimized;
 
@@ -834,9 +910,6 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_inc_transfer_merge(optimized, program);
-    *program = *optimized;
-
-    optimize_divmod(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;

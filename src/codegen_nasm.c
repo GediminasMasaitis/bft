@@ -2,6 +2,16 @@
 
 #include "codegen.h"
 
+// Check if n is a power of 2 and return the shift amount, or -1 if not
+static int get_shift_for_power_of_2(int n) {
+  if (n < 2) return -1;
+  if ((n & (n - 1)) != 0) return -1;  // Not a power of 2
+  
+  int shift = 0;
+  while ((1 << shift) < n) shift++;
+  return shift;
+}
+
 void codegen_nasm(const Program *program, FILE *output) {
   fprintf(output, "section .bss\n");
   fprintf(output, "    cells resb %d\n", CELL_COUNT);
@@ -244,15 +254,51 @@ void codegen_nasm(const Program *program, FILE *output) {
       }
       break;
 
-    case OP_DIVMOD:
-      fprintf(output, "    ; divmod by %d\n", instr->arg);
-      fprintf(output, "    movzx eax, byte [rbx%+d]  ; load dividend\n", instr->offset);
-      fprintf(output, "    xor edx, edx\n");
-      fprintf(output, "    mov cl, %d\n", instr->arg);
-      fprintf(output, "    div cl                    ; al = quotient, ah = remainder\n");
-      fprintf(output, "    add byte [rbx%+d], al     ; accumulate quotient\n", instr->targets[0].offset);
-      fprintf(output, "    mov byte [rbx%+d], ah     ; store remainder\n", instr->targets[0].factor);
+    case OP_DIV: {
+      // dp[targets[0].offset] += dp[offset] / divisor
+      i32 div_off = instr->offset;
+      i32 quot_off = instr->targets[0].offset;
+      i32 divisor = instr->arg;
+      int shift = get_shift_for_power_of_2(divisor);
+
+      fprintf(output, "    ; div by %d\n", divisor);
+      fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
+      
+      if (shift > 0) {
+        // Use bit shift for power of 2
+        fprintf(output, "    shr al, %d\n", shift);
+        fprintf(output, "    add byte [rbx%+d], al\n", quot_off);
+      } else {
+        fprintf(output, "    xor edx, edx\n");
+        fprintf(output, "    mov cl, %d\n", divisor);
+        fprintf(output, "    div cl\n");
+        fprintf(output, "    add byte [rbx%+d], al\n", quot_off);
+      }
       break;
+    }
+
+    case OP_MOD: {
+      // dp[targets[0].offset] = dp[offset] % divisor
+      i32 div_off = instr->offset;
+      i32 rem_off = instr->targets[0].offset;
+      i32 divisor = instr->arg;
+      int shift = get_shift_for_power_of_2(divisor);
+
+      fprintf(output, "    ; mod by %d\n", divisor);
+      fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
+      
+      if (shift > 0) {
+        // Use bit mask for power of 2
+        fprintf(output, "    and al, %d\n", divisor - 1);
+        fprintf(output, "    mov byte [rbx%+d], al\n", rem_off);
+      } else {
+        fprintf(output, "    xor edx, edx\n");
+        fprintf(output, "    mov cl, %d\n", divisor);
+        fprintf(output, "    div cl\n");
+        fprintf(output, "    mov byte [rbx%+d], ah\n", rem_off);
+      }
+      break;
+    }
 
     default:
       fprintf(output, "    ; UNKNOWN OP: %c\n", instr->op);

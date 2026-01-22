@@ -27,7 +27,8 @@ typedef enum {
 
   OP_SEEK_EMPTY = 'E',
   OP_TRANSFER = 'T',
-  OP_DIVMOD = 'D'
+  OP_DIV = '/',
+  OP_MOD = '%',
 } OpCode;
 
 enum {
