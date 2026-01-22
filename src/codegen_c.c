@@ -25,6 +25,23 @@ static int get_shift(int n) {
   return shift;
 }
 
+static void print_multiply_expr(FILE *output, const char *operand, int factor) {
+  int factor_abs = abs(factor);
+  int shift = get_shift(factor_abs);
+  
+  if (factor < 0) {
+    fprintf(output, "-");
+  }
+  
+  if (shift > 0) {
+    fprintf(output, "(%s << %d)", operand, shift);
+  } else if (factor_abs == 1) {
+    fprintf(output, "%s", operand);
+  } else {
+    fprintf(output, "%s * %d", operand, factor_abs);
+  }
+}
+
 void codegen_c(const Program *program, FILE *output) {
   int *skip = calloc(program->size, sizeof(int));
   if (!skip) {
@@ -201,43 +218,40 @@ void codegen_c(const Program *program, FILE *output) {
         int factor = instr->targets[0].factor;
         int factor_abs = abs(factor);
         int bias = instr->targets[0].bias;
+        int shift = get_shift(factor_abs);
+
+        char src_operand[32];
+        snprintf(src_operand, sizeof(src_operand), "dp[%d]", instr->offset);
 
         if (is_assignment) {
           fprintf(output, "dp[%d] = ", instr->targets[0].offset);
           if (bias != 0) {
             fprintf(output, "%d + ", bias);
           }
-          if (factor == -1) {
-            fprintf(output, "-dp[%d]", instr->offset);
-          } else if (factor_abs == 1) {
-            fprintf(output, "dp[%d]", instr->offset);
-          } else if (factor < 0) {
-            fprintf(output, "-dp[%d] * %d", instr->offset, factor_abs);
-          } else {
-            fprintf(output, "dp[%d] * %d", instr->offset, factor);
-          }
+          print_multiply_expr(output, src_operand, factor);
           fprintf(output, ";\n");
         } else {
           if (bias != 0) {
             fprintf(output, "dp[%d] += ", instr->targets[0].offset);
-            if (factor < 0) {
-              fprintf(output, "-");
-            }
-            fprintf(output, "dp[%d]", instr->offset);
-            if (factor_abs != 1) {
-              fprintf(output, " * %d", factor_abs);
-            }
+            print_multiply_expr(output, src_operand, factor);
             if (bias > 0) {
               fprintf(output, " + %d", bias);
             } else {
               fprintf(output, " - %d", -bias);
             }
           } else {
-            char factor_sign = factor >= 0 ? '+' : '-';
-            fprintf(output, "dp[%d] %c= dp[%d]", instr->targets[0].offset,
-                    factor_sign, instr->offset);
-            if (factor_abs != 1) {
-              fprintf(output, " * %d", factor_abs);
+            if (shift > 0) {
+              char op = factor >= 0 ? '+' : '-';
+              fprintf(output, "dp[%d] %c= %s << %d", 
+                      instr->targets[0].offset, op, src_operand, shift);
+            } else if (factor_abs == 1) {
+              char factor_sign = factor >= 0 ? '+' : '-';
+              fprintf(output, "dp[%d] %c= %s", instr->targets[0].offset,
+                      factor_sign, src_operand);
+            } else {
+              char factor_sign = factor >= 0 ? '+' : '-';
+              fprintf(output, "dp[%d] %c= %s * %d", instr->targets[0].offset,
+                      factor_sign, src_operand, factor_abs);
             }
           }
           fprintf(output, ";\n");
@@ -252,27 +266,29 @@ void codegen_c(const Program *program, FILE *output) {
           int factor = instr->targets[t].factor;
           int bias = instr->targets[t].bias;
           int factor_abs = abs(factor);
+          int shift = get_shift(factor_abs);
+
+          char src_operand[32];
+          snprintf(src_operand, sizeof(src_operand), "dp[%d]", instr->offset);
 
           if (bias != 0) {
             fprintf(output, "dp[%d] += ", offset);
-            if (factor < 0) {
-              fprintf(output, "-");
-            }
-            fprintf(output, "dp[%d]", instr->offset);
-            if (factor_abs != 1) {
-              fprintf(output, " * %d", factor_abs);
-            }
+            print_multiply_expr(output, src_operand, factor);
             if (bias > 0) {
               fprintf(output, " + %d", bias);
             } else {
               fprintf(output, " - %d", -bias);
             }
           } else {
-            char factor_sign = factor >= 0 ? '+' : '-';
-            fprintf(output, "dp[%d] %c= dp[%d]", offset, factor_sign,
-                    instr->offset);
-            if (factor_abs != 1) {
-              fprintf(output, " * %d", factor_abs);
+            if (shift > 0) {
+              char op = factor >= 0 ? '+' : '-';
+              fprintf(output, "dp[%d] %c= %s << %d", offset, op, src_operand, shift);
+            } else if (factor_abs == 1) {
+              char factor_sign = factor >= 0 ? '+' : '-';
+              fprintf(output, "dp[%d] %c= %s", offset, factor_sign, src_operand);
+            } else {
+              char factor_sign = factor >= 0 ? '+' : '-';
+              fprintf(output, "dp[%d] %c= %s * %d", offset, factor_sign, src_operand, factor_abs);
             }
           }
           fprintf(output, ";\n");
