@@ -34,12 +34,9 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "#include <stdio.h>\n");
   fprintf(output, "#include <string.h>\n");
   fprintf(output, "\n");
-  fprintf(output, "#define CELL_COUNT %d\n", CELL_COUNT);
-  fprintf(output, "\n");
-  fprintf(output, "static unsigned char cells[CELL_COUNT];\n");
-  fprintf(output, "\n");
 
   fprintf(output, "int main(void) {\n");
+  fprintf(output, "  unsigned char cells[%d] = {0};\n", CELL_COUNT);
   fprintf(output, "  unsigned char *dp = cells;\n");
   fprintf(output, "\n");
 
