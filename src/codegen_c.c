@@ -226,11 +226,18 @@ void codegen_c(const Program *program, FILE *output) {
           fprintf(output, ";\n");
         } else {
           if (bias != 0) {
-            char factor_sign = factor >= 0 ? '+' : '-';
-            fprintf(output, "dp[%d] += %d %c dp[%d]", instr->targets[0].offset,
-                    bias, factor_sign, instr->offset);
+            fprintf(output, "dp[%d] += ", instr->targets[0].offset);
+            if (factor < 0) {
+              fprintf(output, "-");
+            }
+            fprintf(output, "dp[%d]", instr->offset);
             if (factor_abs != 1) {
               fprintf(output, " * %d", factor_abs);
+            }
+            if (bias > 0) {
+              fprintf(output, " + %d", bias);
+            } else {
+              fprintf(output, " - %d", -bias);
             }
           } else {
             char factor_sign = factor >= 0 ? '+' : '-';
@@ -258,15 +265,25 @@ void codegen_c(const Program *program, FILE *output) {
             int factor = instr->targets[t].factor;
             int bias = instr->targets[t].bias;
             int factor_abs = abs(factor);
-            char factor_sign = factor >= 0 ? '+' : '-';
 
             if (bias != 0) {
-              fprintf(output, "dp[%d] += %d %c dp[%d]", offset, bias,
-                      factor_sign, instr->offset);
+              fprintf(output, "dp[%d] += ", offset);
+              // Variable part first
+              if (factor < 0) {
+                fprintf(output, "-");
+              }
+              fprintf(output, "dp[%d]", instr->offset);
               if (factor_abs != 1) {
                 fprintf(output, " * %d", factor_abs);
               }
+              // Bias part second
+              if (bias > 0) {
+                fprintf(output, " + %d", bias);
+              } else {
+                fprintf(output, " - %d", -bias);
+              }
             } else {
+              char factor_sign = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= dp[%d]", offset, factor_sign,
                       instr->offset);
               if (factor_abs != 1) {
