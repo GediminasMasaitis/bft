@@ -249,6 +249,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
     if (offsets[j] != 0 && factors[j] != 0) {
       targets[num_targets].offset = offsets[j];
       targets[num_targets].factor = factors[j];
+      targets[num_targets].bias = 0;
       num_targets++;
     }
   }
@@ -581,6 +582,42 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+void optimize_inc_transfer_merge(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
+
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
+
+    if (curr->op == OP_INC && i + 1 < input->size) {
+      const Instruction *next = &input->instructions[i + 1];
+
+      if (next->op == OP_TRANSFER) {
+        int matched_target = -1;
+        for (int t = 0; t < next->arg; t++) {
+          if (next->targets[t].offset == curr->offset) {
+            matched_target = t;
+            break;
+          }
+        }
+
+        if (matched_target >= 0) {
+          output->instructions[out_index] = *next;
+          output->instructions[out_index].targets[matched_target].bias += curr->arg;
+          out_index++;
+          i++;
+          continue;
+        }
+      }
+    }
+
+    output->instructions[out_index++] = *curr;
+  }
+
+  output->size = out_index;
+  program_calculate_loops(output);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -616,6 +653,9 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_set_transfer_merge(optimized, program);
+    *program = *optimized;
+
+    optimize_inc_transfer_merge(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;

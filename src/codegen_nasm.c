@@ -157,25 +157,51 @@ void codegen_nasm(const Program *program, FILE *output) {
       }
 
       if (instr->arg2 == 1 && instr->arg == 1) {
+        // Assignment mode
         i32 offset = instr->targets[0].offset;
         i32 factor = instr->targets[0].factor;
+        i32 bias = instr->targets[0].bias;
 
         if (factor == 1) {
+          if (bias != 0) {
+            fprintf(output, "    add al, %d\n", bias);
+          }
           fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         } else if (factor == -1) {
           fprintf(output, "    neg al\n");
+          if (bias != 0) {
+            fprintf(output, "    add al, %d\n", bias);
+          }
           fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         } else if (factor > 0) {
           fprintf(output, "    mov cl, %d\n", factor);
           fprintf(output, "    imul cl\n");
+          if (bias != 0) {
+            fprintf(output, "    add al, %d\n", bias);
+          }
           fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         } else {
           fprintf(output, "    mov cl, %d\n", -factor);
           fprintf(output, "    imul cl\n");
           fprintf(output, "    neg al\n");
+          if (bias != 0) {
+            fprintf(output, "    add al, %d\n", bias);
+          }
           fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         }
       } else {
+        for (int t = 0; t < instr->arg; t++) {
+          i32 bias = instr->targets[t].bias;
+          if (bias != 0) {
+            i32 offset = instr->targets[t].offset;
+            if (bias > 0) {
+              fprintf(output, "    add byte [rbx%+d], %d\n", offset, bias);
+            } else {
+              fprintf(output, "    sub byte [rbx%+d], %d\n", offset, -bias);
+            }
+          }
+        }
+
         fprintf(output, "    test al, al\n");
         fprintf(output, "    jz .transfer_done_%d\n", i);
 

@@ -52,6 +52,7 @@ typedef enum {
 typedef struct {
   i32 offset;
   i32 factor;
+  i32 bias;
 } TransferTarget;
 
 typedef struct {

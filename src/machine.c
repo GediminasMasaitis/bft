@@ -177,8 +177,9 @@ status_t machine_run(Machine *machine) {
       for (i32 t = 0; t < instr->arg; t++) {
         i32 offset = instr->targets[t].offset;
         i32 factor = instr->targets[t].factor;
+        i32 bias = instr->targets[t].bias;
         cell_t *dst = &machine->cells[machine->dp + offset];
-        *dst = (cell_t)(*dst + (cell_t)(v * (cell_t)factor));
+        *dst = (cell_t)(*dst + bias + (cell_t)(v * (cell_t)factor));
       }
       break;
     }
