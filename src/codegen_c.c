@@ -9,6 +9,22 @@ static void print_c_indent(FILE *output, int level) {
   }
 }
 
+static int get_shift(int n) {
+  if (n < 2) {
+    return -1;
+  }
+
+  if ((n & (n - 1)) != 0) {
+    return -1;
+  }
+  
+  i32 shift = 0;
+  while ((1 << shift) < n) {
+    shift++;
+  }
+  return shift;
+}
+
 void codegen_c(const Program *program, FILE *output) {
   int *skip = calloc(program->size, sizeof(int));
   if (!skip) {
@@ -268,9 +284,14 @@ void codegen_c(const Program *program, FILE *output) {
       i32 div_off = instr->offset;
       i32 quot_off = instr->targets[0].offset;
       i32 divisor = instr->arg;
+      int shift = get_shift(divisor);
 
       print_c_indent(output, indent_level);
-      fprintf(output, "dp[%d] += dp[%d] / %d;\n", quot_off, div_off, divisor);
+      if (shift > 0) {
+        fprintf(output, "dp[%d] += dp[%d] >> %d;\n", quot_off, div_off, shift);
+      } else {
+        fprintf(output, "dp[%d] += dp[%d] / %d;\n", quot_off, div_off, divisor);
+      }
       break;
     }
 
@@ -278,9 +299,14 @@ void codegen_c(const Program *program, FILE *output) {
       i32 div_off = instr->offset;
       i32 rem_off = instr->targets[0].offset;
       i32 divisor = instr->arg;
+      int shift = get_shift(divisor);
 
       print_c_indent(output, indent_level);
-      fprintf(output, "dp[%d] = dp[%d] %% %d;\n", rem_off, div_off, divisor);
+      if (shift > 0) {
+        fprintf(output, "dp[%d] = dp[%d] & %d;\n", rem_off, div_off, divisor - 1);
+      } else {
+        fprintf(output, "dp[%d] = dp[%d] %% %d;\n", rem_off, div_off, divisor);
+      }
       break;
     }
 
