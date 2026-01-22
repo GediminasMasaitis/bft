@@ -581,6 +581,29 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+static int merge_inc_into_transfer(Instruction *transfer, const Instruction *inc) {
+  int target_idx = -1;
+  for (int t = 0; t < transfer->arg; t++) {
+    if (transfer->targets[t].offset == inc->offset) {
+      target_idx = t;
+    }
+  }
+
+  if (target_idx >= 0) {
+    transfer->targets[target_idx].bias += inc->arg;
+    return 1;
+  }
+
+  if (inc->offset == transfer->offset) {
+    for (int t = 0; t < transfer->arg; t++) {
+      transfer->targets[t].bias += inc->arg * transfer->targets[t].factor;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
 void optimize_inc_transfer_merge(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
@@ -588,38 +611,27 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
 
-    if (curr->op == OP_INC && i + 1 < input->size) {
-      const Instruction *next = &input->instructions[i + 1];
+    if (curr->op == OP_TRANSFER) {
+      Instruction merged = *curr;
 
-      if (next->op == OP_TRANSFER) {
-        int matched_target = -1;
-        for (int t = 0; t < next->arg; t++) {
-          if (next->targets[t].offset == curr->offset) {
-            matched_target = t;
-            break;
-          }
-        }
-
-        if (matched_target >= 0) {
-          output->instructions[out_index] = *next;
-          output->instructions[out_index].targets[matched_target].bias +=
-              curr->arg;
-          out_index++;
-          i++;
-          continue;
-        }
-
-        if (curr->offset == next->offset) {
-          output->instructions[out_index] = *next;
-          for (int t = 0; t < next->arg; t++) {
-            output->instructions[out_index].targets[t].bias +=
-                curr->arg * next->targets[t].factor;
-          }
-          out_index++;
-          i++;
-          continue;
+      while (out_index > 0 && output->instructions[out_index - 1].op == OP_INC) {
+        if (merge_inc_into_transfer(&merged, &output->instructions[out_index - 1])) {
+          out_index--;
+        } else {
+          break;
         }
       }
+
+      while (i + 1 < input->size && input->instructions[i + 1].op == OP_INC) {
+        if (merge_inc_into_transfer(&merged, &input->instructions[i + 1])) {
+          i++;
+        } else {
+          break;
+        }
+      }
+
+      output->instructions[out_index++] = merged;
+      continue;
     }
 
     output->instructions[out_index++] = *curr;
