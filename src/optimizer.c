@@ -776,6 +776,13 @@ void optimize_divmod(Program *output, const Program *input) {
         output->instructions[out_index].targets[0].factor = remainder_off;
         output->instructions[out_index].targets[0].bias = temp_off;
         out_index++;
+
+        output->instructions[out_index].op = OP_SET;
+        output->instructions[out_index].arg = 0;
+        output->instructions[out_index].arg2 = 1;
+        output->instructions[out_index].offset = dividend_off;
+        out_index++;
+
         in_index += 5;
         continue;
       }

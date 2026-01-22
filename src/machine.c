@@ -198,7 +198,6 @@ status_t machine_run(Machine *machine) {
       cell_t div_val = *dividend;
       *quotient += div_val / divisor;
       *remainder = div_val % divisor;
-      *dividend = 0;
       break;
     }
 

@@ -252,7 +252,6 @@ void codegen_nasm(const Program *program, FILE *output) {
       fprintf(output, "    div cl                    ; al = quotient, ah = remainder\n");
       fprintf(output, "    add byte [rbx%+d], al     ; accumulate quotient\n", instr->targets[0].offset);
       fprintf(output, "    mov byte [rbx%+d], ah     ; store remainder\n", instr->targets[0].factor);
-      fprintf(output, "    mov byte [rbx%+d], 0      ; clear dividend\n", instr->offset);
       break;
 
     default:
