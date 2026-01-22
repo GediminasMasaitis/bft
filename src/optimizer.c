@@ -869,6 +869,83 @@ void optimize_divmod(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+void optimize_eliminate_temp_cells(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
+
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
+    if (curr->op == OP_MOD && i + 1 < input->size) {
+      i32 temp_off = curr->targets[0].offset;
+      const Instruction *next = &input->instructions[i + 1];
+
+      if (next->op == OP_TRANSFER && next->arg == 1 && next->arg2 == 1 &&
+          next->offset == temp_off && next->targets[0].factor == 1 &&
+          next->targets[0].bias == 0) {
+        i32 final_off = next->targets[0].offset;
+
+        addr_t set_idx = 0;
+        int can_optimize = 0;
+        
+        for (addr_t j = i + 2; j < input->size && j < i + 10; j++) {
+          const Instruction *future = &input->instructions[j];
+
+          if (future->op == OP_SET && future->arg == 0 && 
+              future->arg2 == 1 && future->offset == temp_off) {
+            set_idx = j;
+            can_optimize = 1;
+            break;
+          }
+
+          if ((future->op == OP_INC || future->op == OP_OUT ||
+               future->op == OP_DIV || future->op == OP_MOD ||
+               future->op == OP_IN) && future->offset == temp_off) {
+            break;
+          }
+          if (future->op == OP_TRANSFER && future->offset == temp_off) {
+            break;
+          }
+
+          if (future->op == OP_TRANSFER) {
+            int writes_temp = 0;
+            for (int t = 0; t < future->arg; t++) {
+              if (future->targets[t].offset == temp_off) {
+                writes_temp = 1;
+                break;
+              }
+            }
+            if (writes_temp) break;
+          }
+
+          if (future->op == OP_LOOP || future->op == OP_END ||
+              future->op == OP_RIGHT || future->op == OP_SEEK_EMPTY) {
+            break;
+          }
+        }
+
+        if (can_optimize) {
+          output->instructions[out_index] = *curr;
+          output->instructions[out_index].targets[0].offset = final_off;
+          out_index++;
+
+          for (addr_t j = i + 2; j < set_idx; j++) {
+            output->instructions[out_index++] = input->instructions[j];
+          }
+          
+          output->instructions[out_index++] = input->instructions[set_idx];
+          i = set_idx;
+          continue;
+        }
+      }
+    }
+
+    output->instructions[out_index++] = *curr;
+  }
+
+  output->size = out_index;
+  program_calculate_loops(output);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -910,6 +987,9 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_inc_transfer_merge(optimized, program);
+    *program = *optimized;
+
+    optimize_eliminate_temp_cells(optimized, program);
     *program = *optimized;
 
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
