@@ -174,12 +174,17 @@ status_t machine_run(Machine *machine) {
     case OP_TRANSFER: {
       cell_t *src = &machine->cells[machine->dp + instr->offset];
       cell_t v = *src;
+      const i32 is_assignment = (instr->arg2 == 1);
       for (i32 t = 0; t < instr->arg; t++) {
-        i32 offset = instr->targets[t].offset;
-        i32 factor = instr->targets[t].factor;
-        i32 bias = instr->targets[t].bias;
+        const i32 offset = instr->targets[t].offset;
+        const i32 factor = instr->targets[t].factor;
+        const i32 bias = instr->targets[t].bias;
         cell_t *dst = &machine->cells[machine->dp + offset];
-        *dst = (cell_t)(*dst + bias + (cell_t)(v * (cell_t)factor));
+        if (is_assignment) {
+          *dst = (cell_t)(bias + (cell_t)(v * (cell_t)factor));
+        } else {
+          *dst = (cell_t)(*dst + bias + (cell_t)(v * (cell_t)factor));
+        }
       }
       break;
     }
