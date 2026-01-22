@@ -564,13 +564,41 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
         i + 1 < input->size) {
       const Instruction *next = &input->instructions[i + 1];
 
-      if (next->op == OP_TRANSFER && next->arg == 1 &&
-          next->targets[0].offset == curr->offset) {
-        output->instructions[out_index] = *next;
-        output->instructions[out_index].arg2 = 1;
-        out_index++;
-        i++;
-        continue;
+      if (next->op == OP_TRANSFER) {
+        int match_idx = -1;
+        for (int t = 0; t < next->arg; t++) {
+          if (next->targets[t].offset == curr->offset) {
+            match_idx = t;
+            break;
+          }
+        }
+
+        if (match_idx >= 0) {
+          output->instructions[out_index].op = OP_TRANSFER;
+          output->instructions[out_index].arg = 1;
+          output->instructions[out_index].arg2 = 1;
+          output->instructions[out_index].offset = next->offset;
+          output->instructions[out_index].targets[0] = next->targets[match_idx];
+          out_index++;
+
+          int remaining = next->arg - 1;
+          if (remaining > 0) {
+            output->instructions[out_index].op = OP_TRANSFER;
+            output->instructions[out_index].arg = remaining;
+            output->instructions[out_index].arg2 = 0;
+            output->instructions[out_index].offset = next->offset;
+            int t_out = 0;
+            for (int t = 0; t < next->arg; t++) {
+              if (t != match_idx) {
+                output->instructions[out_index].targets[t_out++] = next->targets[t];
+              }
+            }
+            out_index++;
+          }
+
+          i++;
+          continue;
+        }
       }
     }
 
