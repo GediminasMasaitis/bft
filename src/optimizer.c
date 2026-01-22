@@ -359,7 +359,8 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
-static int analyze_loop_balance(const Program *program, addr_t loop_start, i32 *net_movement) {
+static int analyze_loop_balance(const Program *program, addr_t loop_start,
+                                i32 *net_movement) {
   if (program->instructions[loop_start].op != OP_LOOP) {
     return 0;
   }
@@ -529,28 +530,26 @@ void optimize_offsets(Program *output, const Program *original) {
   program_calculate_loops(output);
 }
 
-void eliminate_dead_stores(Program* output, const Program* input) {
-    memset(output, 0, sizeof(*output));
-    addr_t out_index = 0;
+void eliminate_dead_stores(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
 
-    for (addr_t i = 0; i < input->size; i++) {
-        const Instruction* curr = &input->instructions[i];
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
 
-        if ((curr->op == OP_INC || curr->op == OP_SET) &&
-            i + 1 < input->size) {
-            const Instruction* next = &input->instructions[i + 1];
-            if (next->op == OP_SET &&
-                next->offset == curr->offset &&
-                next->arg2 == 1) {
-                continue;
-            }
-        }
-
-        output->instructions[out_index++] = *curr;
+    if ((curr->op == OP_INC || curr->op == OP_SET) && i + 1 < input->size) {
+      const Instruction *next = &input->instructions[i + 1];
+      if (next->op == OP_SET && next->offset == curr->offset &&
+          next->arg2 == 1) {
+        continue;
+      }
     }
 
-    output->size = out_index;
-    program_calculate_loops(output);
+    output->instructions[out_index++] = *curr;
+  }
+
+  output->size = out_index;
+  program_calculate_loops(output);
 }
 
 // When arg2=1 on TRANSFER, it means assign not add
@@ -603,7 +602,8 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
 
         if (matched_target >= 0) {
           output->instructions[out_index] = *next;
-          output->instructions[out_index].targets[matched_target].bias += curr->arg;
+          output->instructions[out_index].targets[matched_target].bias +=
+              curr->arg;
           out_index++;
           i++;
           continue;

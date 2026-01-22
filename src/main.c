@@ -31,7 +31,8 @@ static void dump_instructions(const Program *program) {
     }
     if (instr->op == OP_TRANSFER) {
       for (int t = 0; t < instr->arg; t++) {
-        printf(" (off=%d, fac=%d", instr->targets[t].offset, instr->targets[t].factor);
+        printf(" (off=%d, fac=%d", instr->targets[t].offset,
+               instr->targets[t].factor);
         if (instr->targets[t].bias != 0) {
           printf(", bias=%d", instr->targets[t].bias);
         }

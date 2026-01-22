@@ -31,15 +31,6 @@ void codegen_c(const Program *program, FILE *output) {
     }
   }
 
-  int needs_transfer_multiple = 0;
-
-  for (addr_t i = 0; i < program->size; i++) {
-    const Instruction *instr = &program->instructions[i];
-    if (instr->op == OP_TRANSFER && instr->arg > 1) {
-      needs_transfer_multiple = 1;
-    }
-  }
-
   fprintf(output, "#include <stdio.h>\n");
   fprintf(output, "#include <string.h>\n");
   fprintf(output, "\n");
@@ -47,17 +38,6 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "\n");
   fprintf(output, "static unsigned char cells[CELL_COUNT];\n");
   fprintf(output, "\n");
-
-  if (needs_transfer_multiple) {
-    fprintf(output, "static void copy_multiple(unsigned char *dp, const "
-                    "int src_offset, const int count, const int dst_offsets[], "
-                    "const int factors[]) {\n");
-    fprintf(output, "  for (int i = 0; i < count; i++) {\n");
-    fprintf(output, "    dp[dst_offsets[i]] += dp[src_offset] * factors[i];\n");
-    fprintf(output, "  }\n");
-    fprintf(output, "}\n");
-    fprintf(output, "\n");
-  }
 
   fprintf(output, "int main(void) {\n");
   fprintf(output, "  unsigned char *dp = cells;\n");
@@ -250,65 +230,39 @@ void codegen_c(const Program *program, FILE *output) {
           fprintf(output, ";\n");
         }
       } else {
-        int has_bias = 0;
         for (int t = 0; t < instr->arg; t++) {
-          if (instr->targets[t].bias != 0) {
-            has_bias = 1;
-            break;
+          if (t > 0) {
+            print_c_indent(output, indent_level);
           }
-        }
 
-        if (has_bias) {
-          for (int t = 0; t < instr->arg; t++) {
-            if (t > 0) print_c_indent(output, indent_level);
-            int offset = instr->targets[t].offset;
-            int factor = instr->targets[t].factor;
-            int bias = instr->targets[t].bias;
-            int factor_abs = abs(factor);
+          int offset = instr->targets[t].offset;
+          int factor = instr->targets[t].factor;
+          int bias = instr->targets[t].bias;
+          int factor_abs = abs(factor);
 
-            if (bias != 0) {
-              fprintf(output, "dp[%d] += ", offset);
-              // Variable part first
-              if (factor < 0) {
-                fprintf(output, "-");
-              }
-              fprintf(output, "dp[%d]", instr->offset);
-              if (factor_abs != 1) {
-                fprintf(output, " * %d", factor_abs);
-              }
-              // Bias part second
-              if (bias > 0) {
-                fprintf(output, " + %d", bias);
-              } else {
-                fprintf(output, " - %d", -bias);
-              }
-            } else {
-              char factor_sign = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= dp[%d]", offset, factor_sign,
-                      instr->offset);
-              if (factor_abs != 1) {
-                fprintf(output, " * %d", factor_abs);
-              }
+          if (bias != 0) {
+            fprintf(output, "dp[%d] += ", offset);
+            if (factor < 0) {
+              fprintf(output, "-");
             }
-            fprintf(output, ";\n");
+            fprintf(output, "dp[%d]", instr->offset);
+            if (factor_abs != 1) {
+              fprintf(output, " * %d", factor_abs);
+            }
+            if (bias > 0) {
+              fprintf(output, " + %d", bias);
+            } else {
+              fprintf(output, " - %d", -bias);
+            }
+          } else {
+            char factor_sign = factor >= 0 ? '+' : '-';
+            fprintf(output, "dp[%d] %c= dp[%d]", offset, factor_sign,
+                    instr->offset);
+            if (factor_abs != 1) {
+              fprintf(output, " * %d", factor_abs);
+            }
           }
-        } else {
-          fprintf(output, "copy_multiple(dp, %d, %d, (int[]){", instr->offset,
-                  instr->arg);
-          for (int transfer_index = 0; transfer_index < instr->arg;
-               transfer_index++) {
-            fprintf(output, "%d", instr->targets[transfer_index].offset);
-            if (transfer_index < instr->arg - 1)
-              fprintf(output, ", ");
-          }
-          fprintf(output, "}, (int[]){");
-          for (int transfer_index = 0; transfer_index < instr->arg;
-               transfer_index++) {
-            fprintf(output, "%d", instr->targets[transfer_index].factor);
-            if (transfer_index < instr->arg - 1)
-              fprintf(output, ", ");
-          }
-          fprintf(output, "});\n");
+          fprintf(output, ";\n");
         }
       }
       break;

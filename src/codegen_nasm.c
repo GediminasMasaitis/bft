@@ -221,7 +221,8 @@ void codegen_nasm(const Program *program, FILE *output) {
               if (instr->offset == 0) {
                 fprintf(output, "    movzx eax, byte [rbx]\n");
               } else {
-                fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+                fprintf(output, "    movzx eax, byte [rbx%+d]\n",
+                        instr->offset);
               }
             }
           } else {
@@ -232,7 +233,8 @@ void codegen_nasm(const Program *program, FILE *output) {
               if (instr->offset == 0) {
                 fprintf(output, "    movzx eax, byte [rbx]\n");
               } else {
-                fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+                fprintf(output, "    movzx eax, byte [rbx%+d]\n",
+                        instr->offset);
               }
             }
           }
