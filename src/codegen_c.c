@@ -10,6 +10,8 @@ static void print_c_indent(FILE *output, int level) {
 }
 
 static const i32 use_shift_and_mask = 0;
+static const int inc_always_use_offset = 1;
+static const int set_always_use_offset = 1;
 
 static int get_shift(int n) {
   if (!use_shift_and_mask) {
@@ -105,7 +107,7 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_INC:
       print_c_indent(output, indent_level);
-      if (instr->offset == 0) {
+      if (!inc_always_use_offset && instr->offset == 0) {
         if (instr->arg == 1) {
           fprintf(output, "(*dp)++;\n");
         } else if (instr->arg == -1) {
@@ -186,7 +188,7 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_SET:
       print_c_indent(output, indent_level);
-      if (instr->offset == 0) {
+      if (!set_always_use_offset && instr->offset == 0) {
         if (instr->arg2 <= 1) {
           fprintf(output, "*dp = %d;\n", instr->arg);
         } else {
