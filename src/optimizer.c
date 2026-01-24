@@ -319,12 +319,29 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
         }
 
         if (next->op == OP_LOOP || next->op == OP_END || next->op == OP_IN ||
-            next->op == OP_OUT || next->op == OP_RIGHT ||
-            next->op == OP_SEEK_EMPTY || next->op == OP_TRANSFER) {
+            next->op == OP_RIGHT || next->op == OP_SEEK_EMPTY) {
           break;
         }
 
-        if ((next->op == OP_INC || next->op == OP_SET) &&
+        if (next->op == OP_OUT && next->offset != target_offset) {
+          output->instructions[out_index++] = *next;
+          j++;
+          continue;
+        }
+
+        if (next->op == OP_TRANSFER) {
+          int dominated = (next->offset == target_offset);
+          for (int t = 0; t < next->arg && !dominated; t++)
+            dominated = (next->targets[t].offset == target_offset);
+          if (!dominated) {
+            output->instructions[out_index++] = *next;
+            j++;
+            continue;
+          }
+          break;
+        }
+
+        if ((next->op == OP_INC || next->op == OP_SET || next->op == OP_OUT) &&
             next->offset != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
