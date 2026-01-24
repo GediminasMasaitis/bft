@@ -2,13 +2,26 @@
 
 #include "codegen.h"
 
-// Check if n is a power of 2 and return the shift amount, or -1 if not
-static int get_shift_for_power_of_2(int n) {
-  if (n < 2) return -1;
-  if ((n & (n - 1)) != 0) return -1;  // Not a power of 2
-  
-  int shift = 0;
-  while ((1 << shift) < n) shift++;
+static const i32 use_shift_and_mask = 1;
+
+static int get_shift(int n) {
+  if(!use_shift_and_mask) {
+    return -1;
+  }
+
+  if (n < 2) {
+    return -1;
+  }
+
+  if ((n & (n - 1)) != 0) {
+    return -1;
+  }
+
+  i32 shift = 0;
+  while ((1 << shift) < n) {
+    shift++;
+  }
+
   return shift;
 }
 
@@ -259,7 +272,7 @@ void codegen_nasm(const Program *program, FILE *output) {
       i32 div_off = instr->offset;
       i32 quot_off = instr->targets[0].offset;
       i32 divisor = instr->arg;
-      int shift = get_shift_for_power_of_2(divisor);
+      int shift = get_shift(divisor);
 
       fprintf(output, "    ; div by %d\n", divisor);
       fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
@@ -282,7 +295,7 @@ void codegen_nasm(const Program *program, FILE *output) {
       i32 div_off = instr->offset;
       i32 rem_off = instr->targets[0].offset;
       i32 divisor = instr->arg;
-      int shift = get_shift_for_power_of_2(divisor);
+      int shift = get_shift(divisor);
 
       fprintf(output, "    ; mod by %d\n", divisor);
       fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);

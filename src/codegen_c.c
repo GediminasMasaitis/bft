@@ -9,7 +9,13 @@ static void print_c_indent(FILE *output, int level) {
   }
 }
 
+static const i32 use_shift_and_mask = 0;
+
 static int get_shift(int n) {
+  if(!use_shift_and_mask) {
+    return -1;
+  }
+
   if (n < 2) {
     return -1;
   }
@@ -17,11 +23,12 @@ static int get_shift(int n) {
   if ((n & (n - 1)) != 0) {
     return -1;
   }
-  
+
   i32 shift = 0;
   while ((1 << shift) < n) {
     shift++;
   }
+
   return shift;
 }
 
