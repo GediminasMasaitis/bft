@@ -730,21 +730,50 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
     if (curr->op == OP_TRANSFER) {
       Instruction merged = *curr;
 
-      while (out_index > 0 &&
-             output->instructions[out_index - 1].op == OP_INC) {
-        if (merge_inc_into_transfer(&merged,
-                                    &output->instructions[out_index - 1])) {
-          out_index--;
-        } else {
+      int *skip = calloc(out_index, sizeof(int));
+      for (int j = out_index - 1; j >= 0; j--) {
+        if (output->instructions[j].op != OP_INC)
           break;
+
+        if (merge_inc_into_transfer(&merged, &output->instructions[j])) {
+          skip[j] = 1;
+        } else {
+          const Instruction *inc = &output->instructions[j];
+          int interferes = (inc->offset == merged.offset);
+          for (int t = 0; t < merged.arg && !interferes; t++) {
+            if (inc->offset == merged.targets[t].offset)
+              interferes = 1;
+          }
+          if (interferes)
+            break;
         }
       }
+
+      addr_t new_out = 0;
+      for (addr_t j = 0; j < out_index; j++) {
+        if (!skip[j]) {
+          output->instructions[new_out++] = output->instructions[j];
+        }
+      }
+      out_index = new_out;
+      free(skip);
 
       while (i + 1 < input->size && input->instructions[i + 1].op == OP_INC) {
         if (merge_inc_into_transfer(&merged, &input->instructions[i + 1])) {
           i++;
         } else {
-          break;
+          const Instruction *inc = &input->instructions[i + 1];
+          int interferes = (inc->offset == merged.offset);
+          for (int t = 0; t < merged.arg && !interferes; t++) {
+            if (inc->offset == merged.targets[t].offset)
+              interferes = 1;
+          }
+          if (interferes) {
+            break;
+          } else {
+            output->instructions[out_index++] = input->instructions[i + 1];
+            i++;
+          }
         }
       }
 
