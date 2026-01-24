@@ -958,6 +958,85 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+static int instr_touches_offset_for_cancel(const Instruction *instr, const i32 offset) {
+  switch (instr->op) {
+  case OP_INC:
+    return instr->offset == offset;
+  case OP_SET:
+    if (instr->arg2 == 1) {
+      return instr->offset == offset;
+    }
+    return offset >= instr->offset && offset < instr->offset + instr->arg2;
+  case OP_OUT:
+  case OP_IN:
+    return instr->offset == offset;
+  case OP_DIV:
+  case OP_MOD:
+    return instr->offset == offset || instr->targets[0].offset == offset;
+  case OP_TRANSFER:
+    if (instr->offset == offset) return 1;
+    for (int t = 0; t < instr->arg; t++) {
+      if (instr->targets[t].offset == offset) return 1;
+    }
+    return 0;
+  case OP_LOOP:
+  case OP_END:
+  case OP_RIGHT:
+  case OP_SEEK_EMPTY:
+    return 1;
+  default:
+    return 1;
+  }
+}
+
+void optimize_inc_cancellation(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
+
+  int *skip = calloc(input->size, sizeof(int));
+  if (!skip) {
+    *output = *input;
+    return;
+  }
+
+  for (addr_t i = 0; i < input->size; i++) {
+    if (skip[i]) continue;
+
+    const Instruction *instr = &input->instructions[i];
+    if (instr->op != OP_INC) continue;
+
+    i32 offset = instr->offset;
+    i32 delta = instr->arg;
+
+    for (addr_t j = i + 1; j < input->size; j++) {
+      const Instruction *next = &input->instructions[j];
+
+      if (next->op == OP_INC && next->offset == offset) {
+        delta += next->arg;
+        if (delta == 0) {
+          skip[i] = 1;
+          skip[j] = 1;
+        }
+        break;
+      }
+
+      if (instr_touches_offset_for_cancel(next, offset)) {
+        break;
+      }
+    }
+  }
+
+  for (addr_t i = 0; i < input->size; i++) {
+    if (!skip[i]) {
+      output->instructions[out_index++] = input->instructions[i];
+    }
+  }
+
+  free(skip);
+  output->size = out_index;
+  program_calculate_loops(output);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -1004,11 +1083,16 @@ void optimize_program(Program *program) {
     optimize_eliminate_temp_cells(optimized, program);
     *program = *optimized;
 
+    optimize_inc_cancellation(optimized, program);
+    *program = *optimized;
+
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
     if (!changed) {
       break;
     }
   }
+
+
 
   free(optimized);
   free(before_pass);
