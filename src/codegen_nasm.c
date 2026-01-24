@@ -127,27 +127,38 @@ void codegen_nasm(const Program *program, FILE *output) {
       break;
 
     case OP_SET:
-      if (instr->offset == 0) {
-        if (instr->arg2 <= 1) {
+      if (instr->arg2 <= 1) {
+        if (instr->offset == 0) {
           fprintf(output, "    mov byte [rbx], %d\n", instr->arg);
         } else {
+          fprintf(output, "    mov byte [rbx%+d], %d\n", instr->offset,
+                  instr->arg);
+        }
+      } else if (instr->stride == 0 || instr->stride == 1) {
+        if (instr->offset == 0) {
           fprintf(output, "    ; memset %d cells to %d\n", instr->arg2,
                   instr->arg);
           fprintf(output, "    mov rdi, rbx\n");
-          fprintf(output, "    mov al, %d\n", instr->arg);
-          fprintf(output, "    mov rcx, %d\n", instr->arg2);
-          fprintf(output, "    rep stosb\n");
-        }
-      } else {
-        if (instr->arg2 <= 1) {
-          fprintf(output, "    mov byte [rbx%+d], %d\n", instr->offset,
-                  instr->arg);
         } else {
           fprintf(output, "    lea rdi, [rbx%+d]\n", instr->offset);
-          fprintf(output, "    mov al, %d\n", instr->arg);
-          fprintf(output, "    mov rcx, %d\n", instr->arg2);
-          fprintf(output, "    rep stosb\n");
         }
+        fprintf(output, "    mov al, %d\n", instr->arg);
+        fprintf(output, "    mov rcx, %d\n", instr->arg2);
+        fprintf(output, "    rep stosb\n");
+      } else {
+        fprintf(output, "    ; strided set: %d cells, stride %d, value %d\n",
+                instr->arg2, instr->stride, instr->arg);
+        fprintf(output, "    mov rcx, %d\n", instr->arg2);
+        if (instr->offset == 0) {
+          fprintf(output, "    mov rdi, rbx\n");
+        } else {
+          fprintf(output, "    lea rdi, [rbx%+d]\n", instr->offset);
+        }
+        fprintf(output, ".strided_set_%d:\n", i);
+        fprintf(output, "    mov byte [rdi], %d\n", instr->arg);
+        fprintf(output, "    add rdi, %d\n", instr->stride);
+        fprintf(output, "    dec rcx\n");
+        fprintf(output, "    jnz .strided_set_%d\n", i);
       }
       break;
 

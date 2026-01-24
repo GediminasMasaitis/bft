@@ -159,9 +159,14 @@ status_t machine_run(Machine *machine) {
     case OP_SET:
       if (instr->arg2 <= 1) {
         machine->cells[machine->dp + instr->offset] = instr->arg;
-      } else {
+      } else if (instr->stride == 0 || instr->stride == 1) {
         memset(&machine->cells[machine->dp + instr->offset], instr->arg,
                instr->arg2);
+      } else {
+        for (i32 i = 0; i < instr->arg2; i++) {
+          machine->cells[machine->dp + instr->offset + i * instr->stride] =
+              instr->arg;
+        }
       }
       break;
 

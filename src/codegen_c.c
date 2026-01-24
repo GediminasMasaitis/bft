@@ -188,22 +188,25 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_SET:
       print_c_indent(output, indent_level);
-      if (!set_always_use_offset && instr->offset == 0) {
-        if (instr->arg2 <= 1) {
+      if (instr->arg2 <= 1) {
+        if (!set_always_use_offset && instr->offset == 0) {
           fprintf(output, "*dp = %d;\n", instr->arg);
         } else {
-          fprintf(output, "memset(dp, %d, %d);\n", instr->arg, instr->arg2);
-        }
-      } else {
-        const char sign = instr->offset >= 0 ? '+' : '-';
-        const i32 offset_abs =
-            instr->offset >= 0 ? instr->offset : -instr->offset;
-        if (instr->arg2 <= 1) {
           fprintf(output, "dp[%d] = %d;\n", instr->offset, instr->arg);
+        }
+      } else if (instr->stride == 0 || instr->stride == 1) {
+        if (!set_always_use_offset && instr->offset == 0) {
+          fprintf(output, "memset(dp, %d, %d);\n", instr->arg, instr->arg2);
         } else {
+          const char sign = instr->offset >= 0 ? '+' : '-';
+          const i32 offset_abs =
+              instr->offset >= 0 ? instr->offset : -instr->offset;
           fprintf(output, "memset(dp %c %d, %d, %d);\n", sign, offset_abs,
                   instr->arg, instr->arg2);
         }
+      } else {
+        fprintf(output, "for (int i = 0; i < %d; i++) dp[%d + i * %d] = %d;\n",
+                instr->arg2, instr->offset, instr->stride, instr->arg);
       }
       break;
 
