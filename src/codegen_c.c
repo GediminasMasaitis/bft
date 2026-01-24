@@ -78,8 +78,8 @@ void codegen_c(const Program *program, FILE *output) {
   fprintf(output, "\n");
 
   fprintf(output, "int main(void) {\n");
-  fprintf(output, "  unsigned char cells[%d] = {0};\n", CELL_COUNT);
-  fprintf(output, "  unsigned char *dp = cells;\n");
+  fprintf(output, "  unsigned char cells[%d] = {0};\n", CELL_COUNT * 2);
+  fprintf(output, "  unsigned char *dp = cells + %d;\n", CELL_COUNT);
   fprintf(output, "\n");
 
   int indent_level = 1;

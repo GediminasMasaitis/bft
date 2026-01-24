@@ -27,7 +27,7 @@ static int get_shift(int n) {
 
 void codegen_nasm(const Program *program, FILE *output) {
   fprintf(output, "section .bss\n");
-  fprintf(output, "    cells resb %d\n", CELL_COUNT);
+  fprintf(output, "    cells resb %d\n", CELL_COUNT * 2);
   fprintf(output, "\n");
 
   fprintf(output, "section .text\n");
@@ -35,7 +35,7 @@ void codegen_nasm(const Program *program, FILE *output) {
   fprintf(output, "\n");
   fprintf(output, "_start:\n");
   fprintf(output,
-          "    mov rbx, cells      ; rbx = data pointer (callee-saved)\n");
+          "    mov rbx, cells + %d  ; rbx = data pointer (center of tape)\n", CELL_COUNT);
   fprintf(output, "\n");
 
   for (addr_t i = 0; i < program->size; i++) {
