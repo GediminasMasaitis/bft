@@ -958,7 +958,8 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-static int instr_touches_offset_for_cancel(const Instruction *instr, const i32 offset) {
+static int instr_touches_offset_for_cancel(const Instruction *instr,
+                                           const i32 offset) {
   switch (instr->op) {
   case OP_INC:
     return instr->offset == offset;
@@ -974,9 +975,11 @@ static int instr_touches_offset_for_cancel(const Instruction *instr, const i32 o
   case OP_MOD:
     return instr->offset == offset || instr->targets[0].offset == offset;
   case OP_TRANSFER:
-    if (instr->offset == offset) return 1;
+    if (instr->offset == offset)
+      return 1;
     for (int t = 0; t < instr->arg; t++) {
-      if (instr->targets[t].offset == offset) return 1;
+      if (instr->targets[t].offset == offset)
+        return 1;
     }
     return 0;
   case OP_LOOP:
@@ -994,29 +997,22 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
   addr_t out_index = 0;
 
   int *skip = calloc(input->size, sizeof(int));
-  if (!skip) {
-    *output = *input;
-    return;
-  }
+  i32 *adjust = calloc(input->size, sizeof(i32));
 
   for (addr_t i = 0; i < input->size; i++) {
-    if (skip[i]) continue;
-
     const Instruction *instr = &input->instructions[i];
-    if (instr->op != OP_INC) continue;
-
+    if (instr->op != OP_INC) {  
+      continue;
+    }
+    
     i32 offset = instr->offset;
-    i32 delta = instr->arg;
 
     for (addr_t j = i + 1; j < input->size; j++) {
       const Instruction *next = &input->instructions[j];
 
       if (next->op == OP_INC && next->offset == offset) {
-        delta += next->arg;
-        if (delta == 0) {
-          skip[i] = 1;
-          skip[j] = 1;
-        }
+        skip[i] = 1;
+        adjust[j] += instr->arg;
         break;
       }
 
@@ -1027,12 +1023,22 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
   }
 
   for (addr_t i = 0; i < input->size; i++) {
-    if (!skip[i]) {
-      output->instructions[out_index++] = input->instructions[i];
+    if (skip[i]) {
+      continue;
     }
+
+    Instruction out_instr = input->instructions[i];
+    if (out_instr.op == OP_INC) {
+      out_instr.arg += adjust[i];
+      if (out_instr.arg == 0) {
+        continue;
+      }
+    }
+    output->instructions[out_index++] = out_instr;
   }
 
   free(skip);
+  free(adjust);
   output->size = out_index;
   program_calculate_loops(output);
 }
@@ -1091,8 +1097,6 @@ void optimize_program(Program *program) {
       break;
     }
   }
-
-
 
   free(optimized);
   free(before_pass);
