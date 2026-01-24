@@ -643,8 +643,7 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
 
-    if (curr->op == OP_SET && curr->arg == 0 && curr->arg2 == 1 &&
-        i + 1 < input->size) {
+    if (curr->op == OP_SET && curr->arg2 == 1 && i + 1 < input->size) {
       const Instruction *next = &input->instructions[i + 1];
 
       if (next->op == OP_TRANSFER) {
@@ -662,6 +661,7 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
           output->instructions[out_index].arg2 = 1;
           output->instructions[out_index].offset = next->offset;
           output->instructions[out_index].targets[0] = next->targets[match_idx];
+          output->instructions[out_index].targets[0].bias += curr->arg;
           out_index++;
 
           int remaining = next->arg - 1;
@@ -1005,10 +1005,10 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
 
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *instr = &input->instructions[i];
-    if (instr->op != OP_INC) {  
+    if (instr->op != OP_INC) {
       continue;
     }
-    
+
     i32 offset = instr->offset;
 
     for (addr_t j = i + 1; j < input->size; j++) {
