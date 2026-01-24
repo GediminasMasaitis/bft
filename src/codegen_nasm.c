@@ -35,7 +35,8 @@ void codegen_nasm(const Program *program, FILE *output) {
   fprintf(output, "\n");
   fprintf(output, "_start:\n");
   fprintf(output,
-          "    mov rbx, cells + %d  ; rbx = data pointer (center of tape)\n", CELL_COUNT);
+          "    mov rbx, cells + %d  ; rbx = data pointer (center of tape)\n",
+          CELL_COUNT);
   fprintf(output, "\n");
 
   for (addr_t i = 0; i < program->size; i++) {

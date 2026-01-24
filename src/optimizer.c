@@ -41,15 +41,6 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
   program_calculate_loops(output);
 }
 
-// Check for pattern [-] or [+]:
-//
-// Scan for:
-// LOOP
-// INC 1 or INC -1
-// END
-//
-// Replace with:
-// SET 0 1
 void create_zeroing_sets(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
 
@@ -58,12 +49,11 @@ void create_zeroing_sets(Program *output, const Program *input) {
     const Instruction instr = input->instructions[in_index];
     if (instr.op == OP_LOOP && in_index + 2 < input->size &&
         input->instructions[in_index + 1].op == OP_INC &&
-        (input->instructions[in_index + 1].arg == 1 ||
-         input->instructions[in_index + 1].arg == -1) &&
+        (input->instructions[in_index + 1].arg & 1) &&
         input->instructions[in_index + 2].op == OP_END) {
       output->instructions[out_index].op = OP_SET;
-      output->instructions[out_index].arg = 0;  // value
-      output->instructions[out_index].arg2 = 1; // count
+      output->instructions[out_index].arg = 0;
+      output->instructions[out_index].arg2 = 1;
       in_index += 2;
     } else {
       output->instructions[out_index] = instr;
