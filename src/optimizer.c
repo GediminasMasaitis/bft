@@ -881,8 +881,19 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
-    if (curr->op == OP_MOD && i + 1 < input->size) {
-      i32 temp_off = curr->targets[0].offset;
+
+    i32 temp_off;
+    int is_candidate = 0;
+
+    if (curr->op == OP_MOD || curr->op == OP_DIV) {
+      temp_off = curr->targets[0].offset;
+      is_candidate = 1;
+    } else if (curr->op == OP_IN || (curr->op == OP_SET && curr->arg2 == 1)) {
+      temp_off = curr->offset;
+      is_candidate = 1;
+    }
+
+    if (is_candidate && i + 1 < input->size) {
       const Instruction *next = &input->instructions[i + 1];
 
       if (next->op == OP_TRANSFER && next->arg == 1 && next->arg2 == 1 &&
@@ -922,7 +933,11 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
         if (can_optimize) {
           output->instructions[out_index] = *curr;
-          output->instructions[out_index].targets[0].offset = final_off;
+          if (curr->op == OP_MOD || curr->op == OP_DIV) {
+            output->instructions[out_index].targets[0].offset = final_off;
+          } else {
+            output->instructions[out_index].offset = final_off;
+          }
           out_index++;
 
           for (addr_t j = i + 2; j < set_idx; j++) {
