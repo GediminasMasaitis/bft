@@ -536,6 +536,9 @@ static int is_cell_assignment(const Instruction *instr, i32 offset) {
   if (instr->op == OP_SET && instr->arg2 == 1 && instr->offset == offset) {
     return 1;
   }
+  if (instr->op == OP_IN && instr->offset == offset) {
+    return 1;
+  }
   if (instr->op == OP_MOD && instr->targets[0].offset == offset) {
     return 1;
   }
@@ -554,7 +557,17 @@ static int instruction_uses_cell(const Instruction *instr, i32 offset) {
 
   case OP_SET:
     if (instr->arg2 > 1) {
-      return offset >= instr->offset && offset < instr->offset + instr->arg2;
+      if (instr->stride <= 1) {
+        return offset >= instr->offset && offset < instr->offset + instr->arg2;
+      }
+      if (offset < instr->offset) {
+        return 0;
+      }
+      i32 diff = offset - instr->offset;
+      if (diff % instr->stride != 0) {
+        return 0;
+      }
+      return diff / instr->stride < instr->arg2;
     }
     return 0;
 
@@ -961,7 +974,17 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
     if (instr->arg2 == 1) {
       return instr->offset == offset;
     }
-    return offset >= instr->offset && offset < instr->offset + instr->arg2;
+    if (instr->stride <= 1) {
+      return offset >= instr->offset && offset < instr->offset + instr->arg2;
+    }
+    if (offset < instr->offset) {
+      return 0;
+    }
+    i32 diff = offset - instr->offset;
+    if (diff % instr->stride != 0) {
+      return 0;
+    }
+    return diff / instr->stride < instr->arg2;
   case OP_OUT:
   case OP_IN:
     return instr->offset == offset;
