@@ -571,14 +571,16 @@ static int instruction_uses_cell(const Instruction *instr, i32 offset) {
     return instr->offset == offset;
 
   case OP_MOD:
-    
+
     return instr->offset == offset;
 
   case OP_TRANSFER:
-    if (instr->offset == offset) return 1;
+    if (instr->offset == offset)
+      return 1;
     if (instr->arg2 != 1) {
       for (int t = 0; t < instr->arg; t++) {
-        if (instr->targets[t].offset == offset) return 1;
+        if (instr->targets[t].offset == offset)
+          return 1;
       }
     }
     return 0;
@@ -667,7 +669,8 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
             int t_out = 0;
             for (int t = 0; t < next->arg; t++) {
               if (t != match_idx) {
-                output->instructions[out_index].targets[t_out++] = next->targets[t];
+                output->instructions[out_index].targets[t_out++] =
+                    next->targets[t];
               }
             }
             out_index++;
@@ -686,7 +689,8 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-static int merge_inc_into_transfer(Instruction *transfer, const Instruction *inc) {
+static int merge_inc_into_transfer(Instruction *transfer,
+                                   const Instruction *inc) {
   int target_idx = -1;
   for (int t = 0; t < transfer->arg; t++) {
     if (transfer->targets[t].offset == inc->offset) {
@@ -719,8 +723,10 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
     if (curr->op == OP_TRANSFER) {
       Instruction merged = *curr;
 
-      while (out_index > 0 && output->instructions[out_index - 1].op == OP_INC) {
-        if (merge_inc_into_transfer(&merged, &output->instructions[out_index - 1])) {
+      while (out_index > 0 &&
+             output->instructions[out_index - 1].op == OP_INC) {
+        if (merge_inc_into_transfer(&merged,
+                                    &output->instructions[out_index - 1])) {
           out_index--;
         } else {
           break;
@@ -886,12 +892,12 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
         addr_t set_idx = 0;
         int can_optimize = 0;
-        
-        for (addr_t j = i + 2; j < input->size && j < i + 10; j++) {
+
+        for (addr_t j = i + 2; j < input->size; j++) {
           const Instruction *future = &input->instructions[j];
 
-          if (future->op == OP_SET && future->arg == 0 && 
-              future->arg2 == 1 && future->offset == temp_off) {
+          if (future->op == OP_SET && future->arg == 0 && future->arg2 == 1 &&
+              future->offset == temp_off) {
             set_idx = j;
             can_optimize = 1;
             break;
@@ -899,22 +905,13 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
           if ((future->op == OP_INC || future->op == OP_OUT ||
                future->op == OP_DIV || future->op == OP_MOD ||
-               future->op == OP_IN) && future->offset == temp_off) {
-            break;
-          }
-          if (future->op == OP_TRANSFER && future->offset == temp_off) {
+               future->op == OP_IN) &&
+              future->offset == temp_off) {
             break;
           }
 
-          if (future->op == OP_TRANSFER) {
-            int writes_temp = 0;
-            for (int t = 0; t < future->arg; t++) {
-              if (future->targets[t].offset == temp_off) {
-                writes_temp = 1;
-                break;
-              }
-            }
-            if (writes_temp) break;
+          if (future->op == OP_TRANSFER && future->offset == temp_off) {
+            break;
           }
 
           if (future->op == OP_LOOP || future->op == OP_END ||
@@ -931,7 +928,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           for (addr_t j = i + 2; j < set_idx; j++) {
             output->instructions[out_index++] = input->instructions[j];
           }
-          
+
           output->instructions[out_index++] = input->instructions[set_idx];
           i = set_idx;
           continue;

@@ -5,7 +5,7 @@
 static const i32 use_shift_and_mask = 1;
 
 static int get_shift(int n) {
-  if(!use_shift_and_mask) {
+  if (!use_shift_and_mask) {
     return -1;
   }
 
@@ -276,7 +276,7 @@ void codegen_nasm(const Program *program, FILE *output) {
 
       fprintf(output, "    ; div by %d\n", divisor);
       fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
-      
+
       if (shift > 0) {
         // Use bit shift for power of 2
         fprintf(output, "    shr al, %d\n", shift);
@@ -299,7 +299,7 @@ void codegen_nasm(const Program *program, FILE *output) {
 
       fprintf(output, "    ; mod by %d\n", divisor);
       fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
-      
+
       if (shift > 0) {
         // Use bit mask for power of 2
         fprintf(output, "    and al, %d\n", divisor - 1);

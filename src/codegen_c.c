@@ -12,7 +12,7 @@ static void print_c_indent(FILE *output, int level) {
 static const i32 use_shift_and_mask = 0;
 
 static int get_shift(int n) {
-  if(!use_shift_and_mask) {
+  if (!use_shift_and_mask) {
     return -1;
   }
 
@@ -35,11 +35,11 @@ static int get_shift(int n) {
 static void print_multiply_expr(FILE *output, const char *operand, int factor) {
   int factor_abs = abs(factor);
   int shift = get_shift(factor_abs);
-  
+
   if (factor < 0) {
     fprintf(output, "-");
   }
-  
+
   if (shift > 0) {
     fprintf(output, "(%s << %d)", operand, shift);
   } else if (factor_abs == 1) {
@@ -249,8 +249,8 @@ void codegen_c(const Program *program, FILE *output) {
           } else {
             if (shift > 0) {
               char op = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s << %d", 
-                      instr->targets[0].offset, op, src_operand, shift);
+              fprintf(output, "dp[%d] %c= %s << %d", instr->targets[0].offset,
+                      op, src_operand, shift);
             } else if (factor_abs == 1) {
               char factor_sign = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s", instr->targets[0].offset,
@@ -289,13 +289,16 @@ void codegen_c(const Program *program, FILE *output) {
           } else {
             if (shift > 0) {
               char op = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s << %d", offset, op, src_operand, shift);
+              fprintf(output, "dp[%d] %c= %s << %d", offset, op, src_operand,
+                      shift);
             } else if (factor_abs == 1) {
               char factor_sign = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s", offset, factor_sign, src_operand);
+              fprintf(output, "dp[%d] %c= %s", offset, factor_sign,
+                      src_operand);
             } else {
               char factor_sign = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s * %d", offset, factor_sign, src_operand, factor_abs);
+              fprintf(output, "dp[%d] %c= %s * %d", offset, factor_sign,
+                      src_operand, factor_abs);
             }
           }
           fprintf(output, ";\n");
@@ -326,7 +329,8 @@ void codegen_c(const Program *program, FILE *output) {
 
       print_c_indent(output, indent_level);
       if (shift > 0) {
-        fprintf(output, "dp[%d] = dp[%d] & %d;\n", rem_off, div_off, divisor - 1);
+        fprintf(output, "dp[%d] = dp[%d] & %d;\n", rem_off, div_off,
+                divisor - 1);
       } else {
         fprintf(output, "dp[%d] = dp[%d] %% %d;\n", rem_off, div_off, divisor);
       }

@@ -39,11 +39,11 @@ static void dump_instructions(const Program *program) {
         printf(")");
       }
     } else if (instr->op == OP_DIV) {
-      printf(" ; div: dp[%d] += dp[%d] / %d",
-             instr->targets[0].offset, instr->offset, instr->arg);
+      printf(" ; div: dp[%d] += dp[%d] / %d", instr->targets[0].offset,
+             instr->offset, instr->arg);
     } else if (instr->op == OP_MOD) {
-      printf(" ; mod: dp[%d] = dp[%d] %% %d",
-             instr->targets[0].offset, instr->offset, instr->arg);
+      printf(" ; mod: dp[%d] = dp[%d] %% %d", instr->targets[0].offset,
+             instr->offset, instr->arg);
     }
     putchar('\n');
   }

@@ -193,7 +193,8 @@ status_t machine_run(Machine *machine) {
       // dp[targets[0].offset] += dp[offset] / arg
       cell_t *dividend = &machine->cells[machine->dp + instr->offset];
       cell_t divisor = (cell_t)instr->arg;
-      cell_t *quotient = &machine->cells[machine->dp + instr->targets[0].offset];
+      cell_t *quotient =
+          &machine->cells[machine->dp + instr->targets[0].offset];
       *quotient += *dividend / divisor;
       break;
     }
@@ -202,7 +203,8 @@ status_t machine_run(Machine *machine) {
       // dp[targets[0].offset] = dp[offset] % arg
       cell_t *dividend = &machine->cells[machine->dp + instr->offset];
       cell_t divisor = (cell_t)instr->arg;
-      cell_t *remainder = &machine->cells[machine->dp + instr->targets[0].offset];
+      cell_t *remainder =
+          &machine->cells[machine->dp + instr->targets[0].offset];
       *remainder = *dividend % divisor;
       break;
     }
