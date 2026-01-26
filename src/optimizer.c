@@ -1011,6 +1011,107 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+void optimize_nondestructive_copy(Program *output, const Program *input) {
+  memset(output, 0, sizeof(*output));
+  addr_t out_index = 0;
+
+  for (addr_t i = 0; i < input->size; i++) {
+    const Instruction *curr = &input->instructions[i];
+
+    if (curr->op == OP_TRANSFER && curr->arg == 1 && curr->arg2 == 0 &&
+        curr->targets[0].factor == 1 && curr->targets[0].bias == 0) {
+
+      i32 source_off = curr->offset;
+      i32 temp_off = curr->targets[0].offset;
+
+      if (i + 1 < input->size) {
+        const Instruction *restore = &input->instructions[i + 1];
+
+        if (restore->op == OP_TRANSFER && restore->arg == 1 &&
+            restore->arg2 == 1 &&
+            restore->offset == temp_off &&
+            restore->targets[0].offset == source_off &&
+            restore->targets[0].factor == 1 && restore->targets[0].bias == 0) {
+
+          TransferTarget collected_targets[MAX_TRANSFER_TARGETS];
+          int num_collected = 0;
+          addr_t set_idx = 0;
+          int valid_pattern = 1;
+
+          for (addr_t j = i + 2; j < input->size && valid_pattern; j++) {
+            const Instruction *future = &input->instructions[j];
+
+            if (future->op == OP_SET && future->arg == 0 &&
+                future->arg2 == 1 && future->offset == temp_off) {
+              set_idx = j;
+              break;
+            }
+
+            if (future->op == OP_TRANSFER && future->offset == temp_off &&
+                future->arg2 == 0) {
+              for (int t = 0; t < future->arg; t++) {
+                if (num_collected >= MAX_TRANSFER_TARGETS) {
+                  valid_pattern = 0;
+                  break;
+                }
+                collected_targets[num_collected++] = future->targets[t];
+              }
+              continue;
+            }
+
+            if (future->op == OP_TRANSFER) {
+              if (future->offset == temp_off) {
+                valid_pattern = 0;
+                break;
+              }
+
+              for (int t = 0; t < future->arg; t++) {
+                if (future->targets[t].offset == temp_off) {
+                  valid_pattern = 0;
+                  break;
+                }
+              }
+              continue;
+            }
+
+            if ((future->op == OP_INC || future->op == OP_OUT ||
+                 future->op == OP_IN) &&
+                future->offset == temp_off) {
+              valid_pattern = 0;
+              break;
+            }
+
+            if (future->op == OP_LOOP || future->op == OP_END ||
+                future->op == OP_RIGHT || future->op == OP_SEEK_EMPTY) {
+              valid_pattern = 0;
+              break;
+            }
+          }
+
+          if (valid_pattern && set_idx > 0 && num_collected > 0) {
+            output->instructions[out_index].op = OP_TRANSFER;
+            output->instructions[out_index].arg = num_collected;
+            output->instructions[out_index].arg2 = 0;
+            output->instructions[out_index].offset = source_off;
+            for (int t = 0; t < num_collected; t++) {
+              output->instructions[out_index].targets[t] = collected_targets[t];
+            }
+            out_index++;
+
+            i = set_idx;
+            continue;
+          }
+        }
+      }
+    }
+
+    output->instructions[out_index++] = *curr;
+  }
+
+  output->size = out_index;
+  program_calculate_loops(output);
+}
+
 static int instr_touches_offset_for_cancel(const Instruction *instr,
                                            const i32 offset) {
   switch (instr->op) {
@@ -1147,6 +1248,9 @@ void optimize_program(Program *program) {
     *program = *optimized;
 
     optimize_inc_transfer_merge(optimized, program);
+    *program = *optimized;
+
+    optimize_nondestructive_copy(optimized, program);
     *program = *optimized;
 
     optimize_eliminate_temp_cells(optimized, program);
