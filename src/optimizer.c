@@ -234,15 +234,25 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
     }
   }
 
-  if (source_change != -1) {
-    return 0;
+  if (source_change >= 0) {
+    return 0; // Must be negative (decrementing)
   }
+  if ((source_change & 1) == 0) {
+    return 0; // Must be odd to guarantee termination
+  }
+
+  const i32 decrement_mag = -source_change;
 
   int num_targets = 0;
   for (int j = 0; j < num_entries; j++) {
     if (offsets[j] != 0 && factors[j] != 0) {
+      // For decrements > 1, factor must be divisible by decrement magnitude
+      if (decrement_mag > 1 && (factors[j] % decrement_mag) != 0) {
+        return 0; // Can't evenly divide
+      }
+
       targets[num_targets].offset = offsets[j];
-      targets[num_targets].factor = factors[j];
+      targets[num_targets].factor = factors[j] / decrement_mag;
       targets[num_targets].bias = 0;
       num_targets++;
     }
