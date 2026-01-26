@@ -351,6 +351,14 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
           break;
         }
 
+        if ((next->op == OP_DIV || next->op == OP_MOD) &&
+            next->offset != target_offset &&
+            next->targets[0].offset != target_offset) {
+          output->instructions[out_index++] = *next;
+          j++;
+          continue;
+        }
+
         if ((next->op == OP_INC || next->op == OP_SET || next->op == OP_OUT) &&
             next->offset != target_offset) {
           output->instructions[out_index++] = *next;
