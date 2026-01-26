@@ -1011,115 +1011,159 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
-void optimize_nondestructive_copy(Program *output, const Program *input) {
+void optimize_transfer_chain(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
 
-    if (curr->op == OP_TRANSFER && curr->arg2 == 0 && i + 1 < input->size) {
+    // Look for: TRANSFER that writes to potential temp cell(s)
+    if (curr->op == OP_TRANSFER && curr->arg2 == 0) {
       i32 source_off = curr->offset;
-      const Instruction *restore = &input->instructions[i + 1];
 
-      if (restore->op == OP_TRANSFER && restore->arg == 1 &&
-          restore->arg2 == 1 &&
-          restore->targets[0].offset == source_off &&
-          restore->targets[0].factor == 1 && restore->targets[0].bias == 0) {
+      // Try each target as a potential temp cell
+      for (int temp_idx = 0; temp_idx < curr->arg; temp_idx++) {
+        i32 temp_off = curr->targets[temp_idx].offset;
+        i32 F1 = curr->targets[temp_idx].factor;
+        i32 B1 = curr->targets[temp_idx].bias;
 
-        i32 temp_off = restore->offset;
-        int temp_idx = -1;
-        i32 temp_factor = 0;
+        // Collect targets: non-temp targets from curr, plus composed targets
+        // from later transfers
+        TransferTarget collected[MAX_TRANSFER_TARGETS];
+        int num_collected = 0;
+        int source_restored = 0;
 
+        // Add non-temp targets from curr
         for (int t = 0; t < curr->arg; t++) {
-          if (curr->targets[t].offset == temp_off) {
-            temp_idx = t;
-            temp_factor = curr->targets[t].factor;
+          if (t != temp_idx && num_collected < MAX_TRANSFER_TARGETS) {
+            collected[num_collected++] = curr->targets[t];
+          }
+        }
+
+        addr_t set_idx = 0;
+        int valid = 1;
+
+        for (addr_t j = i + 1; j < input->size && valid; j++) {
+          const Instruction *future = &input->instructions[j];
+
+          // Found terminating SET 0
+          if (future->op == OP_SET && future->arg == 0 && future->arg2 == 1 &&
+              future->offset == temp_off) {
+            set_idx = j;
+            break;
+          }
+
+          // Transfer FROM temp - collect with composed factors
+          if (future->op == OP_TRANSFER && future->offset == temp_off &&
+              future->arg2 == 0) {
+            for (int t = 0; t < future->arg; t++) {
+              if (num_collected >= MAX_TRANSFER_TARGETS) {
+                valid = 0;
+                break;
+              }
+              // temp = src*F1 + B1, so target += temp*Ft + Bt = src*(F1*Ft) +
+              // (B1*Ft + Bt)
+              collected[num_collected].offset = future->targets[t].offset;
+              collected[num_collected].factor = F1 * future->targets[t].factor;
+              collected[num_collected].bias =
+                  B1 * future->targets[t].factor + future->targets[t].bias;
+
+              // Check if this restores the source
+              if (future->targets[t].offset == source_off &&
+                  collected[num_collected].factor == 1 &&
+                  collected[num_collected].bias == 0) {
+                source_restored = 1;
+                num_collected++; // still collect it, will filter later if
+                                 // needed
+              } else {
+                num_collected++;
+              }
+            }
+            continue;
+          }
+
+          // Assignment transfer FROM temp (temp -> X, X = temp*F + B)
+          if (future->op == OP_TRANSFER && future->offset == temp_off &&
+              future->arg2 == 1 && future->arg == 1) {
+            // If it restores source exactly, that's OK (non-destructive
+            // pattern)
+            i32 F2 = future->targets[0].factor;
+            i32 B2 = future->targets[0].bias;
+            if (future->targets[0].offset == source_off && F1 * F2 == 1 &&
+                B1 * F2 + B2 == 0) {
+              source_restored = 1;
+              continue;
+            }
+
+            // Otherwise, can't handle assignment transfers
+            valid = 0;
+            break;
+          }
+
+          // Transfer TO temp invalidates
+          if (future->op == OP_TRANSFER) {
+            for (int t = 0; t < future->arg; t++) {
+              if (future->targets[t].offset == temp_off) {
+                valid = 0;
+                break;
+              }
+            }
+            if (!valid)
+              break;
+            continue;
+          }
+
+          // Other reads/writes to temp invalidate
+          if ((future->op == OP_INC || future->op == OP_OUT ||
+               future->op == OP_IN) &&
+              future->offset == temp_off) {
+            valid = 0;
+            break;
+          }
+
+          // Control flow invalidates
+          if (future->op == OP_LOOP || future->op == OP_END ||
+              future->op == OP_RIGHT || future->op == OP_SEEK_EMPTY) {
+            valid = 0;
             break;
           }
         }
 
-        if (temp_idx >= 0 && temp_factor == 1 && curr->targets[temp_idx].bias == 0) {
-          TransferTarget collected_targets[MAX_TRANSFER_TARGETS];
-          int num_collected = 0;
-
-          for (int t = 0; t < curr->arg; t++) {
-            if (t != temp_idx) {
-              if (num_collected >= MAX_TRANSFER_TARGETS) break;
-              collected_targets[num_collected++] = curr->targets[t];
+        // If source was restored, filter it out of collected targets
+        // (it's a no-op: source += source*1 + 0 is just source += source which
+        // we don't want)
+        if (valid && set_idx > 0 && source_restored) {
+          int new_count = 0;
+          for (int t = 0; t < num_collected; t++) {
+            if (collected[t].offset != source_off || collected[t].factor != 1 ||
+                collected[t].bias != 0) {
+              collected[new_count++] = collected[t];
             }
           }
+          num_collected = new_count;
+        }
 
-          addr_t set_idx = 0;
-          int valid_pattern = 1;
-
-          for (addr_t j = i + 2; j < input->size && valid_pattern; j++) {
-            const Instruction *future = &input->instructions[j];
-
-            if (future->op == OP_SET && future->arg == 0 &&
-                future->arg2 == 1 && future->offset == temp_off) {
-              set_idx = j;
-              break;
-            }
-
-            if (future->op == OP_TRANSFER && future->offset == temp_off &&
-                future->arg2 == 0) {
-              for (int t = 0; t < future->arg; t++) {
-                if (num_collected >= MAX_TRANSFER_TARGETS) {
-                  valid_pattern = 0;
-                  break;
-                }
-                collected_targets[num_collected++] = future->targets[t];
-              }
-              continue;
-            }
-
-            if (future->op == OP_TRANSFER) {
-              if (future->offset == temp_off) {
-                valid_pattern = 0;
-                break;
-              }
-              for (int t = 0; t < future->arg; t++) {
-                if (future->targets[t].offset == temp_off) {
-                  valid_pattern = 0;
-                  break;
-                }
-              }
-              continue;
-            }
-
-            if ((future->op == OP_INC || future->op == OP_OUT ||
-                 future->op == OP_IN) &&
-                future->offset == temp_off) {
-              valid_pattern = 0;
-              break;
-            }
-
-            if (future->op == OP_LOOP || future->op == OP_END ||
-                future->op == OP_RIGHT || future->op == OP_SEEK_EMPTY) {
-              valid_pattern = 0;
-              break;
-            }
+        if (valid && set_idx > 0 && num_collected > 0) {
+          // Emit the optimized transfer
+          output->instructions[out_index].op = OP_TRANSFER;
+          output->instructions[out_index].arg = num_collected;
+          output->instructions[out_index].arg2 = 0;
+          output->instructions[out_index].offset = source_off;
+          for (int t = 0; t < num_collected; t++) {
+            output->instructions[out_index].targets[t] = collected[t];
           }
+          out_index++;
 
-          if (valid_pattern && set_idx > 0 && num_collected > 0) {
-            output->instructions[out_index].op = OP_TRANSFER;
-            output->instructions[out_index].arg = num_collected;
-            output->instructions[out_index].arg2 = 0;
-            output->instructions[out_index].offset = source_off;
-            for (int t = 0; t < num_collected; t++) {
-              output->instructions[out_index].targets[t] = collected_targets[t];
-            }
-            out_index++;
-
-            i = set_idx;
-            continue;
-          }
+          // Skip to after SET
+          i = set_idx;
+          goto next_instruction;
         }
       }
     }
 
     output->instructions[out_index++] = *curr;
+  next_instruction:;
   }
 
   output->size = out_index;
@@ -1264,7 +1308,7 @@ void optimize_program(Program *program) {
     optimize_inc_transfer_merge(optimized, program);
     *program = *optimized;
 
-    optimize_nondestructive_copy(optimized, program);
+    optimize_transfer_chain(optimized, program);
     *program = *optimized;
 
     optimize_eliminate_temp_cells(optimized, program);
