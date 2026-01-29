@@ -169,10 +169,13 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
         in_index++;
       }
 
-      output->instructions[out_index].op = instr.op;
-      output->instructions[out_index].arg = count;
-      output->instructions[out_index].offset = offset;
-      out_index++;
+      /* Skip emitting no-ops (e.g., when +5 and -5 cancel out) */
+      if (count != 0) {
+        output->instructions[out_index].op = instr.op;
+        output->instructions[out_index].arg = count;
+        output->instructions[out_index].offset = offset;
+        out_index++;
+      }
     } else {
       output->instructions[out_index] = instr;
       out_index++;
@@ -684,8 +687,9 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
           continue;
         }
 
-        /* INC/SET/OUT on different cell: can be moved before SET */
-        if ((next->op == OP_INC || next->op == OP_SET || next->op == OP_OUT) &&
+        /* INC/SET on different cell: can be moved before SET */
+        /* (OUT @different is already handled above) */
+        if ((next->op == OP_INC || next->op == OP_SET) &&
             next->offset != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
@@ -954,14 +958,29 @@ void optimize_offsets(Program *output, const Program *original) {
  * offset, making any previous value irrelevant (dead).
  *
  * Assignment operations:
- *   - Single-cell SET (arg2 == 1)
+ *   - SET (single-cell or multi-cell if offset is in range)
  *   - IN (reads from input, replacing cell value)
  *   - MOD (assigns remainder to target)
  *   - Assignment-mode TRANSFER with single target (arg2 == 1, arg == 1)
  ******************************************************************************/
 static int is_cell_assignment(const Instruction *instr, i32 offset) {
-  if (instr->op == OP_SET && instr->arg2 == 1 && instr->offset == offset) {
-    return 1;
+  if (instr->op == OP_SET) {
+    if (instr->arg2 == 1) {
+      /* Single-cell SET */
+      return instr->offset == offset;
+    }
+    /* Multi-cell SET: check if offset is in the range being set */
+    if (instr->stride <= 1) {
+      return offset >= instr->offset && offset < instr->offset + instr->arg2;
+    }
+    if (offset < instr->offset) {
+      return 0;
+    }
+    i32 diff = offset - instr->offset;
+    if (diff % instr->stride != 0) {
+      return 0;
+    }
+    return diff / instr->stride < instr->arg2;
   }
   if (instr->op == OP_IN && instr->offset == offset) {
     return 1;
@@ -995,22 +1014,7 @@ static int instruction_uses_cell(const Instruction *instr, i32 offset) {
     return instr->offset == offset;
 
   case OP_SET:
-    /* Multi-cell SET writes to a range; conservatively stop analysis if in
-     * range */
-    if (instr->arg2 > 1) {
-      if (instr->stride <= 1) {
-        return offset >= instr->offset && offset < instr->offset + instr->arg2;
-      }
-      if (offset < instr->offset) {
-        return 0;
-      }
-      i32 diff = offset - instr->offset;
-      if (diff % instr->stride != 0) {
-        return 0;
-      }
-      return diff / instr->stride < instr->arg2;
-    }
-    return 0; /* Single-cell SET doesn't read, only writes */
+    return 0; /* SET only writes, never reads */
 
   case OP_IN:
     return 0; /* IN only writes */
@@ -1688,10 +1692,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
                   collected[num_collected].factor == 1 &&
                   collected[num_collected].bias == 0) {
                 source_restored = 1;
-                num_collected++;
-              } else {
-                num_collected++;
               }
+              num_collected++;
             }
             continue;
           }
