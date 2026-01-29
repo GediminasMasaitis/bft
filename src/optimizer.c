@@ -420,12 +420,8 @@ static addr_t get_loop_length(const Program *output, addr_t input) {
  ******************************************************************************/
 static int analyze_multi_transfer(const Program *program, addr_t loop_start,
                                   TransferTarget *targets) {
-  addr_t i = loop_start;
-
-  if (program->instructions[i].op != OP_LOOP) {
-    return 0;
-  }
-  i++;
+  /* Start after the LOOP instruction (caller already verified it's OP_LOOP) */
+  addr_t i = loop_start + 1;
 
   /* Track relative position within loop body */
   i32 current_offset = 0;
@@ -736,10 +732,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
  ******************************************************************************/
 static int analyze_loop_balance(const Program *program, addr_t loop_start,
                                 i32 *net_movement) {
-  if (program->instructions[loop_start].op != OP_LOOP) {
-    return 0;
-  }
-
+  /* Caller already verified program->instructions[loop_start].op == OP_LOOP */
   i32 movement = 0;
   i32 depth = 1;
   addr_t i = loop_start + 1;
@@ -1347,7 +1340,8 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
                                   i32 *dividend_off, i32 *divisor,
                                   i32 *quotient_off, i32 *remainder_off,
                                   i32 *temp_off) {
-  /* Need exactly 6 instructions */
+  /* Need exactly 6 instructions (caller already verified loop_start is OP_LOOP)
+   */
   if (loop_start + 5 >= program->size) {
     return 0;
   }
@@ -1358,11 +1352,6 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
   const Instruction *transfer2 = &program->instructions[loop_start + 3];
   const Instruction *set_instr = &program->instructions[loop_start + 4];
   const Instruction *end_instr = &program->instructions[loop_start + 5];
-
-  /* Verify LOOP instruction */
-  if (loop_instr->op != OP_LOOP) {
-    return 0;
-  }
 
   /* Verify END matches LOOP */
   if (end_instr->op != OP_END || end_instr->arg != (i32)loop_start) {
