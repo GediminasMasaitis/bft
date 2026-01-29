@@ -123,6 +123,15 @@
 #include "machine.h"
 #include "optimizer.h"
 
+/*
+ * UNSAFE_TRANSFER_CHAIN: When defined, enables aggressive transfer chain
+ * optimization that assumes temp cells start at zero without verification.
+ * This produces smaller output but may cause incorrect behavior for some
+ * programs (e.g., golden.b). Default is safe mode (undefined).
+ *
+ * To enable: compile with -DUNSAFE_TRANSFER_CHAIN
+ */
+
 /*******************************************************************************
  * PASS: INSTRUCTION FOLDING (merge_consecutive_right_inc)
  *
@@ -1690,7 +1699,9 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           /* Assignment TRANSFER FROM temp */
           if (future->op == OP_TRANSFER && future->offset == temp_off &&
               future->arg2 == 1 && future->arg == 1) {
-            /* If it restores source exactly, that's OK */
+#ifdef UNSAFE_TRANSFER_CHAIN
+            /* UNSAFE: Assumes temp starts at zero without verification.
+             * If it restores source exactly, that's OK */
             i32 F2 = future->targets[0].factor;
             i32 B2 = future->targets[0].bias;
             if (future->targets[0].offset == source_off && F1 * F2 == 1 &&
@@ -1698,7 +1709,7 @@ void optimize_transfer_chain(Program *output, const Program *input) {
               source_restored = 1;
               continue;
             }
-            /* Can't handle other assignment transfers */
+#endif
             valid = 0;
             break;
           }
