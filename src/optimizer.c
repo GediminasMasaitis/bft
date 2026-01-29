@@ -33,9 +33,10 @@
  * KEY DATA STRUCTURES:
  * ====================
  * - Instruction.op: The operation type (OP_INC, OP_SET, OP_TRANSFER, etc.)
- * - Instruction.arg: Primary argument (varies by op type)
- * - Instruction.arg2: Secondary argument (varies by op type)
+ * - Instruction.arg: Primary argument (meaning varies by op type)
+ * - Instruction.arg2: Secondary argument (meaning varies by op type)
  * - Instruction.offset: Cell offset relative to data pointer
+ * - Instruction.stride: For multi-cell SET, distance between cells
  * - Instruction.targets[]: Array of TransferTarget for TRANSFER operations
  *
  * TRANSFER INSTRUCTION SEMANTICS:
@@ -47,8 +48,9 @@
  *     else (additive mode, arg2 == 0):
  *       dp[t.offset] += dp[source_offset] * t.factor + t.bias
  *
- * The source cell is READ but NOT MODIFIED by TRANSFER. A separate SET 0
- * instruction is emitted after transfer loops to zero the source.
+ * IMPORTANT: TRANSFER only READS the source cell - it does NOT modify it.
+ * A separate SET 0 instruction is emitted after transfer loops to zero the
+ * source.
  *
  * The optimizer runs multiple iterations until the program stops changing
  * (fixed point) or a maximum of 10 iterations is reached.
@@ -68,7 +70,7 @@
  * Merges consecutive operations of the same type AND same offset into a single
  * operation with an accumulated count.
  *
- * This function is called twice:
+ * This function is called twice per iteration:
  *   1. With op=OP_RIGHT: merges consecutive pointer movements
  *   2. With op=OP_INC: merges consecutive increments/decrements at same offset
  *
@@ -81,8 +83,8 @@
  *   - - -       →  INC with arg=-3 (at offset 0)
  *
  * Note: Only consecutive instructions with MATCHING OFFSETS are merged.
- * After the offset threading pass, INCs may have different offsets and won't
- * merge here (that's handled by optimize_inc_cancellation instead).
+ * After the offset threading pass, INCs at different offsets won't merge
+ * here - that's handled by optimize_inc_cancellation instead.
  ******************************************************************************/
 void merge_consecutive_right_inc(Program *output, const Program *input,
                                  const op_t op) {
@@ -130,10 +132,10 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
  * Pattern detected: [ INC(n) ] where n is ODD
  *
  * Why must n be odd?
- * In 8-bit arithmetic (0-255), repeatedly adding an odd number will eventually
- * hit zero because gcd(odd, 256) = 1, meaning the sequence cycles through all
- * 256 values. For even numbers, gcd(even, 256) > 1, so the sequence only hits
- * multiples of the gcd and may never reach 0 depending on the starting value.
+ * In 8-bit unsigned arithmetic (0-255), repeatedly adding an odd number will
+ * eventually hit zero because gcd(odd, 256) = 1, meaning the sequence cycles
+ * through all 256 values. For even numbers, gcd(even, 256) > 1, so the
+ * sequence may never reach 0 depending on the starting value.
  *
  * Examples:
  *   [-]     → INC arg=-1 (odd)  → SET 0  ✓
@@ -176,19 +178,21 @@ void create_zeroing_sets(Program *output, const Program *input) {
  * Combines sequences of SET instructions separated by constant pointer moves
  * into a single bulk SET operation.
  *
- * Pattern: SET(v) > SET(v) > SET(v) ...  (all same value, consistent stride)
+ * Pattern: SET(v), RIGHT(s), SET(v), RIGHT(s), SET(v), ...
+ *          (all same value v, consistent stride s)
  *
  * This commonly occurs when initializing arrays, e.g., clearing multiple cells:
  *   [-]>[-]>[-]>[-]  →  (after zeroing pass) SET 0, >, SET 0, >, SET 0, >, SET
- *0 →  SET 0 with count=4, stride=1
+ *0 →  SET 0 with count=4, stride=1, then RIGHT 3
  *
- * Output fields:
+ * Output fields for the combined SET:
  *   - arg: the value to set
  *   - arg2: count of cells to set
  *   - stride: distance between cells (typically 1 for contiguous)
  *
  * A final RIGHT instruction is emitted to maintain correct pointer position.
- * The pointer ends at position (count-1)*stride from where it started.
+ * In the original sequence, each SET is followed by RIGHT (except the last
+ *SET). So after the sequence, the pointer has moved by (count-1)*stride.
  ******************************************************************************/
 void optimize_memset(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
@@ -235,8 +239,11 @@ void optimize_memset(Program *output, const Program *input) {
         output->instructions[out_index].stride = stride;
         out_index++;
 
-        /* Emit RIGHT to position pointer correctly after the memset */
-        /* Pointer is now at first cell; needs to be at last cell */
+        /*
+         * Emit RIGHT to position pointer correctly.
+         * Original sequence: SET, RIGHT, SET, RIGHT, ..., SET (no final RIGHT)
+         * Pointer moved (count-1) times by stride each.
+         */
         output->instructions[out_index].op = OP_RIGHT;
         output->instructions[out_index].arg = (count - 1) * stride;
         out_index++;
@@ -261,9 +268,9 @@ void optimize_memset(Program *output, const Program *input) {
  *
  * This loop moves the pointer by n cells each iteration until finding a zero.
  * Common uses:
- *   - [>] scans right for next zero cell
- *   - [<] scans left for previous zero cell
- *   - [>>] scans right, skipping every other cell
+ *   - [>] scans right for next zero cell (stride = 1)
+ *   - [<] scans left for previous zero cell (stride = -1)
+ *   - [>>] scans right, skipping every other cell (stride = 2)
  *
  * Output: OP_SEEK_EMPTY with arg = stride (positive=right, negative=left)
  ******************************************************************************/
@@ -330,11 +337,12 @@ static addr_t get_loop_length(const Program *output, addr_t input) {
  * 2. For each INC instruction, record which offset it modifies and by how much
  * 3. Verify that:
  *    a) The loop is "balanced" - pointer returns to start (current_offset == 0)
- *    b) The source cell (offset 0) is decremented by an odd amount
- *    c) Only RIGHT and INC operations are present (no I/O, nested loops, etc.)
+ *    b) The source cell (offset 0) is decremented by an odd amount per
+ *iteration c) Only RIGHT and INC operations are present (no I/O, nested loops,
+ *etc.)
  *
  * EXAMPLE: [->+>++<<] (copy to dp+1, add 2x to dp+2)
- *   - Offset 0 (source): INC -1 per iteration
+ *   - Offset 0 (source): INC -1 per iteration (decrement by 1)
  *   - Offset 1: INC +1 per iteration
  *   - Offset 2: INC +2 per iteration
  *
@@ -451,8 +459,8 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
     if (offsets[j] != 0 && factors[j] != 0) {
       /*
        * When decrement > 1, the per-iteration factor must divide evenly.
-       * E.g., if source decrements by 2 and target increments by 6,
-       * then effective factor is 6/2 = 3.
+       * E.g., if source decrements by 3 and target increments by 6,
+       * then effective factor is 6/3 = 2.
        */
       if (decrement_mag > 1 && (factors[j] % decrement_mag) != 0) {
         return 0;
@@ -483,7 +491,8 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
  *   SET 0 at offset 0 (zero the source)
  *
  * IMPORTANT: The TRANSFER instruction only READS the source cell.
- * The separate SET 0 instruction zeros it afterward.
+ * The separate SET 0 instruction zeros it afterward. This is why
+ * SET 0 is always emitted after TRANSFER.
  *
  * This converts an O(N) loop into O(1) arithmetic operations, where N is
  * the initial value of the source cell.
@@ -894,7 +903,7 @@ void optimize_offsets(Program *output, const Program *original) {
  *   - Single-cell SET (arg2 == 1)
  *   - IN (reads from input, replacing cell value)
  *   - MOD (assigns remainder to target)
- *   - Assignment-mode TRANSFER (arg2 == 1, single target)
+ *   - Assignment-mode TRANSFER with single target (arg2 == 1, arg == 1)
  ******************************************************************************/
 static int is_cell_assignment(const Instruction *instr, i32 offset) {
   if (instr->op == OP_SET && instr->arg2 == 1 && instr->offset == offset) {
@@ -924,9 +933,6 @@ static int is_cell_assignment(const Instruction *instr, i32 offset) {
  *
  * Returns 1 (conservatively assumes usage) for control flow instructions
  * since we can't reliably track what happens inside loops.
- *
- * NOTE: Multi-cell SET returns true if offset is in range. This is conservative
- *- SET doesn't actually READ cells, but we stop analysis here to be safe.
  ******************************************************************************/
 static int instruction_uses_cell(const Instruction *instr, i32 offset) {
   switch (instr->op) {
@@ -935,7 +941,8 @@ static int instruction_uses_cell(const Instruction *instr, i32 offset) {
     return instr->offset == offset;
 
   case OP_SET:
-    /* Multi-cell SET - conservative: return true if in range */
+    /* Multi-cell SET writes to a range; conservatively stop analysis if in
+     * range */
     if (instr->arg2 > 1) {
       if (instr->stride <= 1) {
         return offset >= instr->offset && offset < instr->offset + instr->arg2;
@@ -949,7 +956,7 @@ static int instruction_uses_cell(const Instruction *instr, i32 offset) {
       }
       return diff / instr->stride < instr->arg2;
     }
-    return 0; /* Single-cell SET doesn't read */
+    return 0; /* Single-cell SET doesn't read, only writes */
 
   case OP_IN:
     return 0; /* IN only writes */
@@ -1043,15 +1050,19 @@ void eliminate_dead_stores(Program *output, const Program *input) {
  * When a SET is immediately followed by a TRANSFER that writes to the SET's
  * target cell, we can merge them into a single assignment TRANSFER with bias.
  *
- * Pattern: SET v @X, TRANSFER(..., target @X with factor F)
+ * Pattern: SET v @X, TRANSFER @src -> ... @X (factor F, bias B) ...
  *
- * Original semantics:
+ * Original semantics (TRANSFER must be additive for this to be valid):
  *   X = v                    (SET)
- *   X += source * F + bias   (TRANSFER additive)
- *   Final: X = v + source * F + bias
+ *   X += src * F + B         (TRANSFER additive)
+ *   Final: X = v + src * F + B
  *
  * Optimized to assignment TRANSFER:
- *   X = source * F + (v + bias)
+ *   X = src * F + (B + v)
+ *
+ * NOTE: This assumes the original TRANSFER is additive (arg2=0). If it were
+ * assignment mode, the SET would have been removed by dead store elimination
+ * which runs before this pass.
  *
  * If the TRANSFER has multiple targets, we split it:
  *   1. Assignment TRANSFER for the target that matches SET (arg2=1)
@@ -1085,7 +1096,7 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
           output->instructions[out_index].offset = next->offset;
           output->instructions[out_index].targets[0] = next->targets[match_idx];
           output->instructions[out_index].targets[0].bias +=
-              curr->arg; /* merge SET value into bias */
+              curr->arg; /* merge SET value */
           out_index++;
 
           /* Emit additive TRANSFER for remaining targets (if any) */
@@ -1123,19 +1134,21 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
  *
  * Attempts to fold an INC instruction into a TRANSFER's bias.
  *
- * CASE 1: INC targets a TRANSFER destination
- *   Before: INC n @X, TRANSFER ... target @X (factor F, bias B)
- *   After:  TRANSFER ... target @X (factor F, bias B+n)
- *   Because: X += n, then X += src*F + B  equals  X += src*F + (B+n)
+ * CASE 1: INC targets a TRANSFER destination cell
+ *   Example: INC n @X ... TRANSFER ... target @X (factor F, bias B)
+ *   Merged: TRANSFER ... target @X (factor F, bias B+n)
+ *   This works for both before and after the TRANSFER.
  *
- * CASE 2: INC targets TRANSFER source
- *   Before: INC n @src, TRANSFER @src -> @X (factor F, bias B)
- *   After:  TRANSFER @src -> @X (factor F, bias B + n*F)
- *   Because: src += n, then X += src*F + B = (orig_src+n)*F + B
- *                                          = orig_src*F + n*F + B
- *   NOTE: This removes the INC, so source is NOT incremented!
- *         This is only valid if source is zeroed afterward (common case
- *         from transfer loops) or never used again.
+ * CASE 2: INC targets the TRANSFER's source cell
+ *   Example: INC n @src, TRANSFER @src -> targets (factor F, bias B)
+ *   Merged: TRANSFER @src -> targets (factor F, bias B + n*F)
+ *
+ *   Math: Original reads (src+n), so targets get (src+n)*F + B = src*F + n*F +
+ *B Merged reads src with adjusted bias: src*F + (B + n*F) ✓
+ *
+ *   IMPORTANT: This removes the INC, so the source cell is NOT incremented!
+ *   This is safe because transfer loops always zero the source afterward
+ *   (TRANSFER is always followed by SET 0 on the source).
  *
  * Returns 1 if merge was successful, 0 otherwise.
  ******************************************************************************/
@@ -1175,8 +1188,8 @@ static int merge_inc_into_transfer(Instruction *transfer,
  *   INC 5 @X, TRANSFER(...target @X) → TRANSFER(...target @X, bias += 5)
  *   TRANSFER(...target @X), INC 5 @X → TRANSFER(...target @X, bias += 5)
  *
- * The pass removes INCs that are successfully merged. For INCs that can't be
- * merged but don't interfere (touch different cells), they pass through.
+ * Merged INCs are removed from the output. For INCs that can't be merged but
+ * don't interfere (touch different cells), they pass through unchanged.
  * When an interfering INC is found, scanning in that direction stops.
  ******************************************************************************/
 void optimize_inc_transfer_merge(Program *output, const Program *input) {
@@ -1255,25 +1268,23 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
 /*******************************************************************************
  * PASS: DIVMOD PATTERN ANALYSIS (analyze_divmod_pattern)
  *
- * Recognizes a specific loop pattern that implements integer division and
- * modulo using a countdown technique.
+ * Recognizes a specific 6-instruction loop pattern that implements integer
+ * division and modulo operations.
  *
- * The pattern structure is exactly 6 instructions:
- *   LOOP @dividend
- *   INC -1 @dividend        ; decrement dividend
- *   TRANSFER @remainder -> @temp (factor -1, bias=divisor-1), @quotient (factor
- *1) TRANSFER @temp -> @remainder (assignment, factor 1) SET 0 @temp END
- *@dividend
+ * The exact pattern structure is:
+ *   LOOP @dividend_off
+ *   INC -1 @dividend_off
+ *   TRANSFER @remainder_off -> @temp_off (factor=-1, bias=divisor-1),
+ *                              @quotient_off (factor=1, bias=0)
+ *   TRANSFER @temp_off -> @remainder_off (assignment, factor=1)
+ *   SET 0 @temp_off
+ *   END @dividend_off
  *
- * How the algorithm works:
- * - temp is a countdown counter initialized to divisor-1
- * - Each iteration: dividend--, temp--, quotient++
- * - When temp reaches 0: temp is reset to divisor-1 via the bias, and
- *   remainder gets the countdown value
- * - After the loop: quotient = dividend / divisor, remainder = dividend %
- *divisor
+ * The algorithm uses a countdown technique with a temporary cell. The divisor
+ * is encoded as (bias + 1) in the first transfer's temp target.
  *
  * Returns 1 if pattern matches, 0 otherwise.
+ * Sets output parameters to the relevant cell offsets and divisor value.
  ******************************************************************************/
 static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
                                   i32 *dividend_off, i32 *divisor,
@@ -1316,28 +1327,29 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
     return 0;
   }
 
-  /* First target is temp with factor -1 (countdown) */
+  /* First target is temp with factor -1 */
   if (transfer1->targets[0].factor != -1) {
     return 0;
   }
 
-  /* Second target is quotient with factor 1 */
+  /* Second target is quotient with factor 1, no bias */
   if (transfer1->targets[1].factor != 1 || transfer1->targets[1].bias != 0) {
     return 0;
   }
 
-  /* Second TRANSFER: assignment from temp */
+  /* Second TRANSFER: assignment from temp to remainder */
   if (transfer2->op != OP_TRANSFER || transfer2->arg != 1 ||
       transfer2->arg2 != 1) {
     return 0;
   }
 
-  /* Source of second TRANSFER is temp cell */
+  /* Source of second TRANSFER must be temp cell */
   if (transfer2->offset != transfer1->targets[0].offset) {
     return 0;
   }
 
-  /* Destination is remainder cell (same as first TRANSFER source), factor 1 */
+  /* Destination must be remainder (same as first TRANSFER's source), factor 1
+   */
   if (transfer2->targets[0].offset != transfer1->offset ||
       transfer2->targets[0].factor != 1) {
     return 0;
@@ -1353,9 +1365,9 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
 
   /* Extract values */
   *dividend_off = loop_instr->offset;
-  *divisor = transfer1->targets[0].bias + 1; /* bias is divisor-1 */
+  *divisor = transfer1->targets[0].bias + 1; /* divisor encoded as bias+1 */
   *quotient_off = transfer1->targets[1].offset;
-  *remainder_off = transfer1->offset;
+  *remainder_off = transfer1->offset; /* source of first TRANSFER */
   *temp_off = transfer1->targets[0].offset;
 
   /* Divisor must be at least 2 */
@@ -1372,9 +1384,13 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
  * Replaces the divmod loop pattern with OP_DIV and OP_MOD instructions.
  *
  * OP_DIV semantics: dp[quotient_off] += dp[dividend_off] / divisor
- * OP_MOD semantics: dp[remainder_off] = dp[dividend_off] % divisor
+ *                   (ADDS to quotient, does not assign)
  *
- * Note: DIV ADDS to quotient (+=), MOD ASSIGNS remainder (=).
+ * OP_MOD semantics: dp[remainder_off] = dp[dividend_off] % divisor
+ *                   (ASSIGNS to remainder)
+ *
+ * Also emits SET 0 to clear the dividend (the original loop decremented it to
+ *0).
  ******************************************************************************/
 void optimize_divmod(Program *output, const Program *input) {
   memset(output, 0, sizeof(*output));
@@ -1430,14 +1446,14 @@ void optimize_divmod(Program *output, const Program *input) {
  *
  * Pattern:
  *   WRITE @temp     (MOD, DIV, IN, or SET)
- *   TRANSFER @temp -> @final (factor=1, bias=0, assignment)
+ *   TRANSFER @temp -> @final (factor=1, bias=0, assignment mode)
  *   ... instructions not touching @temp ...
  *   SET 0 @temp
  *
  * Optimized to:
  *   WRITE @final    (directly to final destination)
  *   ... instructions ...
- *   SET 0 @temp     (still needed to clear temp)
+ *   SET 0 @temp     (still emitted to clear temp)
  *
  * This eliminates the intermediate TRANSFER.
  ******************************************************************************/
@@ -1470,7 +1486,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           next->targets[0].bias == 0) {
         i32 final_off = next->targets[0].offset;
 
-        /* Look for terminating SET 0 */
+        /* Look for terminating SET 0 @temp */
         addr_t set_idx = 0;
         int can_optimize = 0;
 
@@ -1538,7 +1554,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
  * PASS: TRANSFER CHAIN OPTIMIZATION (optimize_transfer_chain)
  *
  * Optimizes chains of transfers through temporary cells by composing the
- * factors and biases.
+ * factors and biases, eliminating the intermediate temp.
  *
  * Pattern:
  *   TRANSFER @source -> @temp (factor F1, bias B1), ...other targets
@@ -1546,7 +1562,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
  *   SET 0 @temp
  *
  * Composition math:
- *   temp = source * F1 + B1
+ *   temp = source * F1 + B1   (conceptually; TRANSFER adds, doesn't assign)
  *   final += temp * F2 + B2 = (source * F1 + B1) * F2 + B2
  *                           = source * (F1*F2) + (B1*F2 + B2)
  *
@@ -1554,7 +1570,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
  *   TRANSFER @source -> @final (factor F1*F2, bias B1*F2+B2), ...other targets
  *
  * The optimization handles multiple transfers from temp and can detect when
- * the source is "restored" (transferred back to source with factor 1, bias 0),
+ * the source is "restored" (transferred back with factor 1, bias 0),
  * in which case the restoration is filtered out as a no-op.
  ******************************************************************************/
 void optimize_transfer_chain(Program *output, const Program *input) {
@@ -1608,14 +1624,14 @@ void optimize_transfer_chain(Program *output, const Program *input) {
                 valid = 0;
                 break;
               }
-              /* Compose: final += temp * Ft + Bt = source*(F1*Ft) + (B1*Ft +
-               * Bt) */
+              /* Compose: final += temp*Ft + Bt = source*(F1*Ft) + (B1*Ft + Bt)
+               */
               collected[num_collected].offset = future->targets[t].offset;
               collected[num_collected].factor = F1 * future->targets[t].factor;
               collected[num_collected].bias =
                   B1 * future->targets[t].factor + future->targets[t].bias;
 
-              /* Check if this restores source */
+              /* Check if this restores source (factor=1, bias=0 to source) */
               if (future->targets[t].offset == source_off &&
                   collected[num_collected].factor == 1 &&
                   collected[num_collected].bias == 0) {
@@ -1644,7 +1660,7 @@ void optimize_transfer_chain(Program *output, const Program *input) {
             break;
           }
 
-          /* TRANSFER TO temp invalidates */
+          /* TRANSFER TO temp invalidates our analysis */
           if (future->op == OP_TRANSFER) {
             for (int t = 0; t < future->arg; t++) {
               if (future->targets[t].offset == temp_off) {
@@ -1673,7 +1689,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
         }
 
-        /* Filter out source restoration (it's a no-op) */
+        /* Filter out source restoration (it's a no-op: source += source is
+         * wrong) */
         if (valid && set_idx > 0 && source_restored) {
           int new_count = 0;
           for (int t = 0; t < num_collected; t++) {
@@ -1717,8 +1734,7 @@ void optimize_transfer_chain(Program *output, const Program *input) {
  * in any way (read or write). Used by INC cancellation to determine when
  * INC merging must stop.
  *
- * This is more conservative than instruction_uses_cell - we stop at ANY
- * interaction, not just reads.
+ * More conservative than instruction_uses_cell - we stop at ANY interaction.
  ******************************************************************************/
 static int instr_touches_offset_for_cancel(const Instruction *instr,
                                            const i32 offset) {
@@ -1845,24 +1861,20 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
  * stops changing (fixed point) or 10 iterations are reached.
  *
  * PASS ORDER RATIONALE:
- * 1-2. Instruction folding (simplifies everything else)
- * 3.   Zeroing detection ([-] → SET 0)
- * 4.   Memset (combine SET sequences)
- * 5.   Seek empty ([>] → SEEK_EMPTY)
- * 6.   Transfer optimization (major: [->+<] → TRANSFER)
- * 7.   SET+INC merge (constant folding)
- * 8.   Offset threading (eliminate RIGHT instructions)
- * 9.   Divmod detection (specialized pattern)
- * 10.  Dead store elimination (cleanup)
- * 11.  SET+TRANSFER merge (algebraic simplification)
- * 12.  INC+TRANSFER merge (algebraic simplification)
- * 13.  Transfer chain (eliminate temp cells)
- * 14.  Temp cell elimination
- * 15.  INC cancellation (final cleanup)
+ * - Instruction folding first (simplifies everything else)
+ * - Idiom recognition (zeroing, memset, seek) creates new instruction types
+ * - Transfer optimization (major: [->+<] → TRANSFER) - O(N) to O(1)
+ * - SET+INC merge (constant folding after transfers)
+ * - Offset threading (eliminates most RIGHT instructions)
+ * - Divmod detection (specialized pattern after offsets applied)
+ * - Dead store elimination (cleanup after other passes)
+ * - Algebraic simplifications (SET/INC + TRANSFER merges)
+ * - Chain/temp optimizations (eliminate intermediate cells)
+ * - INC cancellation (final cleanup)
  *
  * Multiple iterations are needed because passes enable each other:
- * - Transfer creates SET 0 which enables dead store elimination
- * - Offset threading may expose new merging opportunities
+ * - Transfer creates SET 0 which may enable dead store elimination
+ * - Dead store elimination may expose new merging opportunities
  * - Chain optimization may enable more dead store elimination
  ******************************************************************************/
 void optimize_program(Program *program) {
@@ -1872,62 +1884,62 @@ void optimize_program(Program *program) {
   for (int iteration = 0; iteration < 10; iteration++) {
     memcpy(before_pass, program, sizeof(Program));
 
-    /* Passes 1-2: Instruction folding */
+    /* Instruction folding - merge consecutive RIGHT and INC */
     merge_consecutive_right_inc(optimized, program, OP_RIGHT);
     *program = *optimized;
 
     merge_consecutive_right_inc(optimized, program, OP_INC);
     *program = *optimized;
 
-    /* Pass 3: Zeroing loop detection */
+    /* Zeroing loop detection: [-] → SET 0 */
     create_zeroing_sets(optimized, program);
     *program = *optimized;
 
-    /* Pass 4: Memset optimization */
+    /* Memset optimization: SET > SET > SET → SET(count) */
     optimize_memset(optimized, program);
     *program = *optimized;
 
-    /* Pass 5: Seek empty optimization */
+    /* Seek empty optimization: [>] → SEEK_EMPTY */
     optimize_seek_empty(optimized, program);
     *program = *optimized;
 
-    /* Pass 6: Transfer loop optimization */
+    /* Transfer loop optimization: [->+<] → TRANSFER + SET 0 */
     optimize_multi_transfer(optimized, program);
     *program = *optimized;
 
-    /* Pass 7: SET + INC merge */
+    /* SET + INC merge: SET v, INC n → SET (v+n) */
     optimize_set_inc_merge(optimized, program);
     *program = *optimized;
 
-    /* Pass 8: Offset threading */
+    /* Offset threading: eliminate RIGHT by using offsets */
     optimize_offsets(optimized, program);
     *program = *optimized;
 
-    /* Pass 9: Divmod pattern detection */
+    /* Divmod pattern detection */
     optimize_divmod(optimized, program);
     *program = *optimized;
 
-    /* Pass 10: Dead store elimination */
+    /* Dead store elimination */
     eliminate_dead_stores(optimized, program);
     *program = *optimized;
 
-    /* Pass 11: SET + TRANSFER merge */
+    /* SET + TRANSFER merge */
     optimize_set_transfer_merge(optimized, program);
     *program = *optimized;
 
-    /* Pass 12: INC + TRANSFER merge */
+    /* INC + TRANSFER merge */
     optimize_inc_transfer_merge(optimized, program);
     *program = *optimized;
 
-    /* Pass 13: Transfer chain optimization */
+    /* Transfer chain optimization */
     optimize_transfer_chain(optimized, program);
     *program = *optimized;
 
-    /* Pass 14: Temp cell elimination */
+    /* Temp cell elimination */
     optimize_eliminate_temp_cells(optimized, program);
     *program = *optimized;
 
-    /* Pass 15: INC cancellation */
+    /* INC cancellation */
     optimize_inc_cancellation(optimized, program);
     *program = *optimized;
 
