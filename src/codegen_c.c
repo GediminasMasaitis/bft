@@ -61,12 +61,12 @@ void codegen_c(const Program *program, FILE *output) {
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
     if (instr->op == OP_LOOP) {
-      addr_t end_idx = instr->arg;
+      addr_t end_idx = instr->loop.match_addr;
       if (end_idx > 0 && program->instructions[end_idx - 1].op == OP_RIGHT) {
         skip[end_idx - 1] = 1;
         if (i > 0 && program->instructions[i - 1].op == OP_SET &&
-            program->instructions[i - 1].arg2 == 1 &&
-            program->instructions[i - 1].offset == 0) {
+            program->instructions[i - 1].set.count == 1 &&
+            program->instructions[i - 1].set.offset == 0) {
           skip[i - 1] = 1;
         }
       }
@@ -94,87 +94,89 @@ void codegen_c(const Program *program, FILE *output) {
     switch (instr->op) {
     case OP_RIGHT:
       print_c_indent(output, indent_level);
-      if (instr->arg == 1) {
+      if (instr->right.distance == 1) {
         fprintf(output, "dp++;\n");
-      } else if (instr->arg == -1) {
+      } else if (instr->right.distance == -1) {
         fprintf(output, "dp--;\n");
-      } else if (instr->arg > 0) {
-        fprintf(output, "dp += %d;\n", instr->arg);
+      } else if (instr->right.distance > 0) {
+        fprintf(output, "dp += %d;\n", instr->right.distance);
       } else {
-        fprintf(output, "dp -= %d;\n", -instr->arg);
+        fprintf(output, "dp -= %d;\n", -instr->right.distance);
       }
       break;
 
     case OP_INC:
       print_c_indent(output, indent_level);
-      if (!inc_always_use_offset && instr->offset == 0) {
-        if (instr->arg == 1) {
+      if (!inc_always_use_offset && instr->inc.offset == 0) {
+        if (instr->inc.amount == 1) {
           fprintf(output, "(*dp)++;\n");
-        } else if (instr->arg == -1) {
+        } else if (instr->inc.amount == -1) {
           fprintf(output, "(*dp)--;\n");
-        } else if (instr->arg > 0) {
-          fprintf(output, "*dp += %d;\n", instr->arg);
+        } else if (instr->inc.amount > 0) {
+          fprintf(output, "*dp += %d;\n", instr->inc.amount);
         } else {
-          fprintf(output, "*dp -= %d;\n", -instr->arg);
+          fprintf(output, "*dp -= %d;\n", -instr->inc.amount);
         }
       } else {
-        if (instr->arg == 1) {
-          fprintf(output, "dp[%d]++;\n", instr->offset);
-        } else if (instr->arg == -1) {
-          fprintf(output, "dp[%d]--;\n", instr->offset);
-        } else if (instr->arg > 0) {
-          fprintf(output, "dp[%d] += %d;\n", instr->offset, instr->arg);
+        if (instr->inc.amount == 1) {
+          fprintf(output, "dp[%d]++;\n", instr->inc.offset);
+        } else if (instr->inc.amount == -1) {
+          fprintf(output, "dp[%d]--;\n", instr->inc.offset);
+        } else if (instr->inc.amount > 0) {
+          fprintf(output, "dp[%d] += %d;\n", instr->inc.offset,
+                  instr->inc.amount);
         } else {
-          fprintf(output, "dp[%d] -= %d;\n", instr->offset, -instr->arg);
+          fprintf(output, "dp[%d] -= %d;\n", instr->inc.offset,
+                  -instr->inc.amount);
         }
       }
       break;
 
     case OP_OUT:
       print_c_indent(output, indent_level);
-      if (instr->offset == 0) {
+      if (instr->out.offset == 0) {
         fprintf(output, "putchar(*dp);\n");
       } else {
-        fprintf(output, "putchar(dp[%d]);\n", instr->offset);
+        fprintf(output, "putchar(dp[%d]);\n", instr->out.offset);
       }
       break;
 
     case OP_IN:
       print_c_indent(output, indent_level);
-      if (instr->offset == 0) {
+      if (instr->in.offset == 0) {
         fprintf(output, "*dp = getchar();\n");
       } else {
-        fprintf(output, "dp[%d] = getchar();\n", instr->offset);
+        fprintf(output, "dp[%d] = getchar();\n", instr->in.offset);
       }
       break;
 
     case OP_LOOP:
       print_c_indent(output, indent_level);
       {
-        addr_t end_idx = instr->arg;
-        if (end_idx > 0 && skip[end_idx - 1] && instr->offset == 0) {
+        addr_t end_idx = instr->loop.match_addr;
+        if (end_idx > 0 && skip[end_idx - 1] && instr->loop.offset == 0) {
           const Instruction *right_instr = &program->instructions[end_idx - 1];
           if (i > 0 && skip[i - 1] &&
-              program->instructions[i - 1].offset == 0) {
+              program->instructions[i - 1].set.offset == 0) {
             const Instruction *set_instr = &program->instructions[i - 1];
-            fprintf(output, "for (*dp = %d; *dp != 0; ", set_instr->arg);
+            fprintf(output, "for (*dp = %d; *dp != 0; ", set_instr->set.value);
           } else {
             fprintf(output, "for (; *dp != 0; ");
           }
-          if (right_instr->arg == 1) {
+          if (right_instr->right.distance == 1) {
             fprintf(output, "dp++");
-          } else if (right_instr->arg == -1) {
+          } else if (right_instr->right.distance == -1) {
             fprintf(output, "dp--");
-          } else if (right_instr->arg > 0) {
-            fprintf(output, "dp += %d", right_instr->arg);
+          } else if (right_instr->right.distance > 0) {
+            fprintf(output, "dp += %d", right_instr->right.distance);
           } else {
-            fprintf(output, "dp -= %d", -right_instr->arg);
+            fprintf(output, "dp -= %d", -right_instr->right.distance);
           }
           fprintf(output, ") {\n");
-        } else if (instr->offset == 0) {
+        } else if (instr->loop.offset == 0) {
           fprintf(output, "while (*dp != 0) {\n");
         } else {
-          fprintf(output, "while (dp[%d] != 0) {\n", instr->offset);
+          fprintf(output, "while (dp[%d] != 0) {\n", instr->loop.offset);
         }
       }
       indent_level++;
@@ -188,55 +190,59 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_SET:
       print_c_indent(output, indent_level);
-      if (instr->arg2 <= 1) {
-        if (!set_always_use_offset && instr->offset == 0) {
-          fprintf(output, "*dp = %d;\n", instr->arg);
+      if (instr->set.count <= 1) {
+        if (!set_always_use_offset && instr->set.offset == 0) {
+          fprintf(output, "*dp = %d;\n", instr->set.value);
         } else {
-          fprintf(output, "dp[%d] = %d;\n", instr->offset, instr->arg);
+          fprintf(output, "dp[%d] = %d;\n", instr->set.offset,
+                  instr->set.value);
         }
-      } else if (instr->stride == 0 || instr->stride == 1) {
-        if (!set_always_use_offset && instr->offset == 0) {
-          fprintf(output, "memset(dp, %d, %d);\n", instr->arg, instr->arg2);
+      } else if (instr->set.stride == 0 || instr->set.stride == 1) {
+        if (!set_always_use_offset && instr->set.offset == 0) {
+          fprintf(output, "memset(dp, %d, %d);\n", instr->set.value,
+                  instr->set.count);
         } else {
-          const char sign = instr->offset >= 0 ? '+' : '-';
+          const char sign = instr->set.offset >= 0 ? '+' : '-';
           const i32 offset_abs =
-              instr->offset >= 0 ? instr->offset : -instr->offset;
+              instr->set.offset >= 0 ? instr->set.offset : -instr->set.offset;
           fprintf(output, "memset(dp %c %d, %d, %d);\n", sign, offset_abs,
-                  instr->arg, instr->arg2);
+                  instr->set.value, instr->set.count);
         }
       } else {
         fprintf(output, "for (int i = 0; i < %d; i++) dp[%d + i * %d] = %d;\n",
-                instr->arg2, instr->offset, instr->stride, instr->arg);
+                instr->set.count, instr->set.offset, instr->set.stride,
+                instr->set.value);
       }
       break;
 
     case OP_SEEK_EMPTY:
       print_c_indent(output, indent_level);
-      char sign = instr->arg >= 0 ? '+' : '-';
-      int step_abs = abs(instr->arg);
-      if (instr->offset == 0) {
+      char sign = instr->seek.step >= 0 ? '+' : '-';
+      int step_abs = abs(instr->seek.step);
+      if (instr->seek.offset == 0) {
         fprintf(output, "while (*dp != 0) dp %c= %d; // seek empty\n", sign,
                 step_abs);
       } else {
         fprintf(output, "while (dp[%d] != 0) dp %c= %d; // seek empty\n",
-                instr->offset, sign, step_abs);
+                instr->seek.offset, sign, step_abs);
       }
       break;
 
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
-      if (instr->arg == 1) {
-        int is_assignment = instr->arg2 == 1;
-        int factor = instr->targets[0].factor;
+      if (instr->transfer.target_count == 1) {
+        int is_assignment = instr->transfer.is_assignment;
+        int factor = instr->transfer.targets[0].factor;
         int factor_abs = abs(factor);
-        int bias = instr->targets[0].bias;
+        int bias = instr->transfer.targets[0].bias;
         int shift = get_shift(factor_abs);
 
         char src_operand[32];
-        snprintf(src_operand, sizeof(src_operand), "dp[%d]", instr->offset);
+        snprintf(src_operand, sizeof(src_operand), "dp[%d]",
+                 instr->transfer.src_offset);
 
         if (is_assignment) {
-          fprintf(output, "dp[%d] = ", instr->targets[0].offset);
+          fprintf(output, "dp[%d] = ", instr->transfer.targets[0].offset);
           if (bias != 0) {
             fprintf(output, "%d + ", bias);
           }
@@ -244,7 +250,7 @@ void codegen_c(const Program *program, FILE *output) {
           fprintf(output, ";\n");
         } else {
           if (bias != 0) {
-            fprintf(output, "dp[%d] += ", instr->targets[0].offset);
+            fprintf(output, "dp[%d] += ", instr->transfer.targets[0].offset);
             print_multiply_expr(output, src_operand, factor);
             if (bias > 0) {
               fprintf(output, " + %d", bias);
@@ -254,34 +260,38 @@ void codegen_c(const Program *program, FILE *output) {
           } else {
             if (shift > 0) {
               char op = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s << %d", instr->targets[0].offset,
-                      op, src_operand, shift);
+              fprintf(output, "dp[%d] %c= %s << %d",
+                      instr->transfer.targets[0].offset, op, src_operand,
+                      shift);
             } else if (factor_abs == 1) {
               char factor_sign = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s", instr->targets[0].offset,
-                      factor_sign, src_operand);
+              fprintf(output, "dp[%d] %c= %s",
+                      instr->transfer.targets[0].offset, factor_sign,
+                      src_operand);
             } else {
               char factor_sign = factor >= 0 ? '+' : '-';
-              fprintf(output, "dp[%d] %c= %s * %d", instr->targets[0].offset,
-                      factor_sign, src_operand, factor_abs);
+              fprintf(output, "dp[%d] %c= %s * %d",
+                      instr->transfer.targets[0].offset, factor_sign,
+                      src_operand, factor_abs);
             }
           }
           fprintf(output, ";\n");
         }
       } else {
-        for (int t = 0; t < instr->arg; t++) {
+        for (int t = 0; t < instr->transfer.target_count; t++) {
           if (t > 0) {
             print_c_indent(output, indent_level);
           }
 
-          int offset = instr->targets[t].offset;
-          int factor = instr->targets[t].factor;
-          int bias = instr->targets[t].bias;
+          int offset = instr->transfer.targets[t].offset;
+          int factor = instr->transfer.targets[t].factor;
+          int bias = instr->transfer.targets[t].bias;
           int factor_abs = abs(factor);
           int shift = get_shift(factor_abs);
 
           char src_operand[32];
-          snprintf(src_operand, sizeof(src_operand), "dp[%d]", instr->offset);
+          snprintf(src_operand, sizeof(src_operand), "dp[%d]",
+                   instr->transfer.src_offset);
 
           if (bias != 0) {
             fprintf(output, "dp[%d] += ", offset);
@@ -312,9 +322,9 @@ void codegen_c(const Program *program, FILE *output) {
       break;
 
     case OP_DIV: {
-      i32 div_off = instr->offset;
-      i32 quot_off = instr->targets[0].offset;
-      i32 divisor = instr->arg;
+      i32 div_off = instr->div.src_offset;
+      i32 quot_off = instr->div.targets[0].offset;
+      i32 divisor = instr->div.divisor;
       int shift = get_shift(divisor);
 
       print_c_indent(output, indent_level);
@@ -327,9 +337,9 @@ void codegen_c(const Program *program, FILE *output) {
     }
 
     case OP_MOD: {
-      i32 div_off = instr->offset;
-      i32 rem_off = instr->targets[0].offset;
-      i32 divisor = instr->arg;
+      i32 div_off = instr->mod.src_offset;
+      i32 rem_off = instr->mod.targets[0].offset;
+      i32 divisor = instr->mod.divisor;
       int shift = get_shift(divisor);
 
       print_c_indent(output, indent_level);

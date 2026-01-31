@@ -18,8 +18,8 @@ status_t program_calculate_loops(Program *program) {
       }
       stack_size--;
       addr_t open = stack[stack_size];
-      program->instructions[open].arg = i;
-      program->instructions[i].arg = open;
+      program->instructions[open].loop.match_addr = i;
+      program->instructions[i].loop.match_addr = open;
     }
   }
 
@@ -45,7 +45,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = OP_RIGHT;
-      program->instructions[program->size].arg = 1;
+      program->instructions[program->size].right.distance = 1;
       program->size++;
       break;
 
@@ -55,7 +55,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = OP_RIGHT;
-      program->instructions[program->size].arg = -1;
+      program->instructions[program->size].right.distance = -1;
       program->size++;
       break;
 
@@ -65,7 +65,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = OP_INC;
-      program->instructions[program->size].arg = 1;
+      program->instructions[program->size].inc.amount = 1;
       program->size++;
       break;
 
@@ -75,7 +75,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = OP_INC;
-      program->instructions[program->size].arg = -1;
+      program->instructions[program->size].inc.amount = -1;
       program->size++;
       break;
 
@@ -88,7 +88,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = op;
-      program->instructions[program->size].arg = 1;
+      /* These instructions don't need initialization - offsets default to 0 */
       program->size++;
       break;
 
@@ -110,7 +110,7 @@ status_t machine_run(Machine *machine) {
     case OP_RIGHT:
 #ifndef UNSAFE
     {
-      i32 new_dp = machine->dp + instr->arg;
+      i32 new_dp = machine->dp + instr->right.distance;
       if (new_dp < 0) {
         fprintf(
             stderr,
@@ -127,63 +127,64 @@ status_t machine_run(Machine *machine) {
       }
     }
 #endif
-      machine->dp += instr->arg;
+      machine->dp += instr->right.distance;
       break;
 
     case OP_INC:
-      machine->cells[machine->dp + instr->offset] += instr->arg;
+      machine->cells[machine->dp + instr->inc.offset] += instr->inc.amount;
       break;
 
     case OP_OUT:
 #ifndef SILENT
-      putchar(machine->cells[machine->dp + instr->offset]);
+      putchar(machine->cells[machine->dp + instr->out.offset]);
 #endif
       break;
 
     case OP_IN:
-      machine->cells[machine->dp + instr->offset] = getchar();
+      machine->cells[machine->dp + instr->in.offset] = getchar();
       break;
 
     case OP_LOOP:
-      if (machine->cells[machine->dp + instr->offset] == 0) {
-        machine->ip = instr->arg;
+      if (machine->cells[machine->dp + instr->loop.offset] == 0) {
+        machine->ip = instr->loop.match_addr;
       }
       break;
 
     case OP_END:
-      if (machine->cells[machine->dp + instr->offset] != 0) {
-        machine->ip = instr->arg;
+      if (machine->cells[machine->dp + instr->loop.offset] != 0) {
+        machine->ip = instr->loop.match_addr;
       }
       break;
 
     case OP_SET:
-      if (instr->arg2 <= 1) {
-        machine->cells[machine->dp + instr->offset] = instr->arg;
-      } else if (instr->stride == 0 || instr->stride == 1) {
-        memset(&machine->cells[machine->dp + instr->offset], instr->arg,
-               instr->arg2);
+      if (instr->set.count <= 1) {
+        machine->cells[machine->dp + instr->set.offset] = instr->set.value;
+      } else if (instr->set.stride == 0 || instr->set.stride == 1) {
+        memset(&machine->cells[machine->dp + instr->set.offset],
+               instr->set.value, instr->set.count);
       } else {
-        for (i32 i = 0; i < instr->arg2; i++) {
-          machine->cells[machine->dp + instr->offset + i * instr->stride] =
-              instr->arg;
+        for (i32 i = 0; i < instr->set.count; i++) {
+          machine
+              ->cells[machine->dp + instr->set.offset + i * instr->set.stride] =
+              instr->set.value;
         }
       }
       break;
 
     case OP_SEEK_EMPTY:
-      while (machine->cells[machine->dp + instr->offset] != 0) {
-        machine->dp += instr->arg;
+      while (machine->cells[machine->dp + instr->seek.offset] != 0) {
+        machine->dp += instr->seek.step;
       }
       break;
 
     case OP_TRANSFER: {
-      cell_t *src = &machine->cells[machine->dp + instr->offset];
+      cell_t *src = &machine->cells[machine->dp + instr->transfer.src_offset];
       cell_t v = *src;
-      const i32 is_assignment = (instr->arg2 == 1);
-      for (i32 t = 0; t < instr->arg; t++) {
-        const i32 offset = instr->targets[t].offset;
-        const i32 factor = instr->targets[t].factor;
-        const i32 bias = instr->targets[t].bias;
+      const i32 is_assignment = instr->transfer.is_assignment;
+      for (i32 t = 0; t < instr->transfer.target_count; t++) {
+        const i32 offset = instr->transfer.targets[t].offset;
+        const i32 factor = instr->transfer.targets[t].factor;
+        const i32 bias = instr->transfer.targets[t].bias;
         cell_t *dst = &machine->cells[machine->dp + offset];
         if (is_assignment) {
           *dst = (cell_t)(bias + (cell_t)(v * (cell_t)factor));
@@ -195,21 +196,21 @@ status_t machine_run(Machine *machine) {
     }
 
     case OP_DIV: {
-      // dp[targets[0].offset] += dp[offset] / arg
-      cell_t *dividend = &machine->cells[machine->dp + instr->offset];
-      cell_t divisor = (cell_t)instr->arg;
+      // dp[div.targets[0].offset] += dp[div.src_offset] / div.divisor
+      cell_t *dividend = &machine->cells[machine->dp + instr->div.src_offset];
+      cell_t divisor = (cell_t)instr->div.divisor;
       cell_t *quotient =
-          &machine->cells[machine->dp + instr->targets[0].offset];
+          &machine->cells[machine->dp + instr->div.targets[0].offset];
       *quotient += *dividend / divisor;
       break;
     }
 
     case OP_MOD: {
-      // dp[targets[0].offset] = dp[offset] % arg
-      cell_t *dividend = &machine->cells[machine->dp + instr->offset];
-      cell_t divisor = (cell_t)instr->arg;
+      // dp[mod.targets[0].offset] = dp[mod.src_offset] % mod.divisor
+      cell_t *dividend = &machine->cells[machine->dp + instr->mod.src_offset];
+      cell_t divisor = (cell_t)instr->mod.divisor;
       cell_t *remainder =
-          &machine->cells[machine->dp + instr->targets[0].offset];
+          &machine->cells[machine->dp + instr->mod.targets[0].offset];
       *remainder = *dividend % divisor;
       break;
     }

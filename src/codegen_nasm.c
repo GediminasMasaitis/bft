@@ -44,39 +44,39 @@ void codegen_nasm(const Program *program, FILE *output) {
 
     switch (instr->op) {
     case OP_RIGHT:
-      if (instr->arg == 1) {
+      if (instr->right.distance == 1) {
         fprintf(output, "    inc rbx\n");
-      } else if (instr->arg == -1) {
+      } else if (instr->right.distance == -1) {
         fprintf(output, "    dec rbx\n");
-      } else if (instr->arg > 0) {
-        fprintf(output, "    add rbx, %d\n", instr->arg);
+      } else if (instr->right.distance > 0) {
+        fprintf(output, "    add rbx, %d\n", instr->right.distance);
       } else {
-        fprintf(output, "    sub rbx, %d\n", -instr->arg);
+        fprintf(output, "    sub rbx, %d\n", -instr->right.distance);
       }
       break;
 
     case OP_INC:
-      if (instr->offset == 0) {
-        if (instr->arg == 1) {
+      if (instr->inc.offset == 0) {
+        if (instr->inc.amount == 1) {
           fprintf(output, "    inc byte [rbx]\n");
-        } else if (instr->arg == -1) {
+        } else if (instr->inc.amount == -1) {
           fprintf(output, "    dec byte [rbx]\n");
-        } else if (instr->arg > 0) {
-          fprintf(output, "    add byte [rbx], %d\n", instr->arg);
+        } else if (instr->inc.amount > 0) {
+          fprintf(output, "    add byte [rbx], %d\n", instr->inc.amount);
         } else {
-          fprintf(output, "    sub byte [rbx], %d\n", -instr->arg);
+          fprintf(output, "    sub byte [rbx], %d\n", -instr->inc.amount);
         }
       } else {
-        if (instr->arg == 1) {
-          fprintf(output, "    inc byte [rbx%+d]\n", instr->offset);
-        } else if (instr->arg == -1) {
-          fprintf(output, "    dec byte [rbx%+d]\n", instr->offset);
-        } else if (instr->arg > 0) {
-          fprintf(output, "    add byte [rbx%+d], %d\n", instr->offset,
-                  instr->arg);
+        if (instr->inc.amount == 1) {
+          fprintf(output, "    inc byte [rbx%+d]\n", instr->inc.offset);
+        } else if (instr->inc.amount == -1) {
+          fprintf(output, "    dec byte [rbx%+d]\n", instr->inc.offset);
+        } else if (instr->inc.amount > 0) {
+          fprintf(output, "    add byte [rbx%+d], %d\n", instr->inc.offset,
+                  instr->inc.amount);
         } else {
-          fprintf(output, "    sub byte [rbx%+d], %d\n", instr->offset,
-                  -instr->arg);
+          fprintf(output, "    sub byte [rbx%+d], %d\n", instr->inc.offset,
+                  -instr->inc.amount);
         }
       }
       break;
@@ -84,11 +84,11 @@ void codegen_nasm(const Program *program, FILE *output) {
     case OP_OUT:
       fprintf(output, "    mov rax, 1          ; write\n");
       fprintf(output, "    mov rdi, 1          ; stdout\n");
-      if (instr->offset == 0) {
+      if (instr->out.offset == 0) {
         fprintf(output, "    mov rsi, rbx        ; current cell\n");
       } else {
         fprintf(output, "    lea rsi, [rbx%+d]   ; cell at offset %d\n",
-                instr->offset, instr->offset);
+                instr->out.offset, instr->out.offset);
       }
       fprintf(output, "    mov rdx, 1          ; 1 byte\n");
       fprintf(output, "    syscall\n");
@@ -97,11 +97,11 @@ void codegen_nasm(const Program *program, FILE *output) {
     case OP_IN:
       fprintf(output, "    mov rax, 0          ; read\n");
       fprintf(output, "    mov rdi, 0          ; stdin\n");
-      if (instr->offset == 0) {
+      if (instr->in.offset == 0) {
         fprintf(output, "    mov rsi, rbx        ; current cell\n");
       } else {
         fprintf(output, "    lea rsi, [rbx%+d]   ; cell at offset %d\n",
-                instr->offset, instr->offset);
+                instr->in.offset, instr->in.offset);
       }
       fprintf(output, "    mov rdx, 1          ; 1 byte\n");
       fprintf(output, "    syscall\n");
@@ -109,55 +109,55 @@ void codegen_nasm(const Program *program, FILE *output) {
 
     case OP_LOOP:
       fprintf(output, ".loop%d_start:\n", i);
-      if (instr->offset == 0) {
+      if (instr->loop.offset == 0) {
         fprintf(output, "    cmp byte [rbx], 0\n");
       } else {
-        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->offset);
+        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->loop.offset);
       }
       fprintf(output, "    je .loop%d_end\n", i);
       break;
 
     case OP_END:
-      if (instr->offset == 0) {
+      if (instr->loop.offset == 0) {
         fprintf(output, "    cmp byte [rbx], 0\n");
       } else {
-        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->offset);
+        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->loop.offset);
       }
-      fprintf(output, "    jne .loop%d_start\n", instr->arg);
-      fprintf(output, ".loop%d_end:\n", instr->arg);
+      fprintf(output, "    jne .loop%d_start\n", instr->loop.match_addr);
+      fprintf(output, ".loop%d_end:\n", instr->loop.match_addr);
       break;
 
     case OP_SET:
-      if (instr->arg2 <= 1) {
-        if (instr->offset == 0) {
-          fprintf(output, "    mov byte [rbx], %d\n", instr->arg);
+      if (instr->set.count <= 1) {
+        if (instr->set.offset == 0) {
+          fprintf(output, "    mov byte [rbx], %d\n", instr->set.value);
         } else {
-          fprintf(output, "    mov byte [rbx%+d], %d\n", instr->offset,
-                  instr->arg);
+          fprintf(output, "    mov byte [rbx%+d], %d\n", instr->set.offset,
+                  instr->set.value);
         }
-      } else if (instr->stride == 0 || instr->stride == 1) {
-        if (instr->offset == 0) {
-          fprintf(output, "    ; memset %d cells to %d\n", instr->arg2,
-                  instr->arg);
+      } else if (instr->set.stride == 0 || instr->set.stride == 1) {
+        if (instr->set.offset == 0) {
+          fprintf(output, "    ; memset %d cells to %d\n", instr->set.count,
+                  instr->set.value);
           fprintf(output, "    mov rdi, rbx\n");
         } else {
-          fprintf(output, "    lea rdi, [rbx%+d]\n", instr->offset);
+          fprintf(output, "    lea rdi, [rbx%+d]\n", instr->set.offset);
         }
-        fprintf(output, "    mov al, %d\n", instr->arg);
-        fprintf(output, "    mov rcx, %d\n", instr->arg2);
+        fprintf(output, "    mov al, %d\n", instr->set.value);
+        fprintf(output, "    mov rcx, %d\n", instr->set.count);
         fprintf(output, "    rep stosb\n");
       } else {
         fprintf(output, "    ; strided set: %d cells, stride %d, value %d\n",
-                instr->arg2, instr->stride, instr->arg);
-        fprintf(output, "    mov rcx, %d\n", instr->arg2);
-        if (instr->offset == 0) {
+                instr->set.count, instr->set.stride, instr->set.value);
+        fprintf(output, "    mov rcx, %d\n", instr->set.count);
+        if (instr->set.offset == 0) {
           fprintf(output, "    mov rdi, rbx\n");
         } else {
-          fprintf(output, "    lea rdi, [rbx%+d]\n", instr->offset);
+          fprintf(output, "    lea rdi, [rbx%+d]\n", instr->set.offset);
         }
         fprintf(output, ".strided_set_%d:\n", i);
-        fprintf(output, "    mov byte [rdi], %d\n", instr->arg);
-        fprintf(output, "    add rdi, %d\n", instr->stride);
+        fprintf(output, "    mov byte [rdi], %d\n", instr->set.value);
+        fprintf(output, "    add rdi, %d\n", instr->set.stride);
         fprintf(output, "    dec rcx\n");
         fprintf(output, "    jnz .strided_set_%d\n", i);
       }
@@ -165,37 +165,38 @@ void codegen_nasm(const Program *program, FILE *output) {
 
     case OP_SEEK_EMPTY:
       fprintf(output, ".find_empty_%d:\n", i);
-      if (instr->offset == 0) {
+      if (instr->seek.offset == 0) {
         fprintf(output, "    cmp byte [rbx], 0\n");
       } else {
-        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->offset);
+        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->seek.offset);
       }
       fprintf(output, "    je .find_empty_done_%d\n", i);
-      if (instr->arg == 1) {
+      if (instr->seek.step == 1) {
         fprintf(output, "    inc rbx\n");
-      } else if (instr->arg == -1) {
+      } else if (instr->seek.step == -1) {
         fprintf(output, "    dec rbx\n");
-      } else if (instr->arg > 1) {
-        fprintf(output, "    add rbx, %d\n", instr->arg);
+      } else if (instr->seek.step > 1) {
+        fprintf(output, "    add rbx, %d\n", instr->seek.step);
       } else {
-        fprintf(output, "    sub rbx, %d\n", -instr->arg);
+        fprintf(output, "    sub rbx, %d\n", -instr->seek.step);
       }
       fprintf(output, "    jmp .find_empty_%d\n", i);
       fprintf(output, ".find_empty_done_%d:\n", i);
       break;
 
     case OP_TRANSFER:
-      if (instr->offset == 0) {
+      if (instr->transfer.src_offset == 0) {
         fprintf(output, "    movzx eax, byte [rbx]\n");
       } else {
-        fprintf(output, "    movzx eax, byte [rbx%+d]\n", instr->offset);
+        fprintf(output, "    movzx eax, byte [rbx%+d]\n",
+                instr->transfer.src_offset);
       }
 
-      if (instr->arg2 == 1 && instr->arg == 1) {
+      if (instr->transfer.is_assignment && instr->transfer.target_count == 1) {
         // Assignment mode
-        i32 offset = instr->targets[0].offset;
-        i32 factor = instr->targets[0].factor;
-        i32 bias = instr->targets[0].bias;
+        i32 offset = instr->transfer.targets[0].offset;
+        i32 factor = instr->transfer.targets[0].factor;
+        i32 bias = instr->transfer.targets[0].bias;
 
         if (factor == 1) {
           if (bias != 0) {
@@ -225,10 +226,10 @@ void codegen_nasm(const Program *program, FILE *output) {
           fprintf(output, "    mov byte [rbx%+d], al\n", offset);
         }
       } else {
-        for (int t = 0; t < instr->arg; t++) {
-          i32 bias = instr->targets[t].bias;
+        for (int t = 0; t < instr->transfer.target_count; t++) {
+          i32 bias = instr->transfer.targets[t].bias;
           if (bias != 0) {
-            i32 offset = instr->targets[t].offset;
+            i32 offset = instr->transfer.targets[t].offset;
             if (bias > 0) {
               fprintf(output, "    add byte [rbx%+d], %d\n", offset, bias);
             } else {
@@ -240,9 +241,9 @@ void codegen_nasm(const Program *program, FILE *output) {
         fprintf(output, "    test al, al\n");
         fprintf(output, "    jz .transfer_done_%d\n", i);
 
-        for (int t = 0; t < instr->arg; t++) {
-          i32 offset = instr->targets[t].offset;
-          i32 factor = instr->targets[t].factor;
+        for (int t = 0; t < instr->transfer.target_count; t++) {
+          i32 offset = instr->transfer.targets[t].offset;
+          i32 factor = instr->transfer.targets[t].factor;
 
           if (factor == 1) {
             fprintf(output, "    add byte [rbx%+d], al\n", offset);
@@ -252,24 +253,24 @@ void codegen_nasm(const Program *program, FILE *output) {
             fprintf(output, "    mov cl, %d\n", factor);
             fprintf(output, "    imul cl\n");
             fprintf(output, "    add byte [rbx%+d], al\n", offset);
-            if (t < instr->arg - 1) {
-              if (instr->offset == 0) {
+            if (t < instr->transfer.target_count - 1) {
+              if (instr->transfer.src_offset == 0) {
                 fprintf(output, "    movzx eax, byte [rbx]\n");
               } else {
                 fprintf(output, "    movzx eax, byte [rbx%+d]\n",
-                        instr->offset);
+                        instr->transfer.src_offset);
               }
             }
           } else {
             fprintf(output, "    mov cl, %d\n", -factor);
             fprintf(output, "    imul cl\n");
             fprintf(output, "    sub byte [rbx%+d], al\n", offset);
-            if (t < instr->arg - 1) {
-              if (instr->offset == 0) {
+            if (t < instr->transfer.target_count - 1) {
+              if (instr->transfer.src_offset == 0) {
                 fprintf(output, "    movzx eax, byte [rbx]\n");
               } else {
                 fprintf(output, "    movzx eax, byte [rbx%+d]\n",
-                        instr->offset);
+                        instr->transfer.src_offset);
               }
             }
           }
@@ -280,10 +281,10 @@ void codegen_nasm(const Program *program, FILE *output) {
       break;
 
     case OP_DIV: {
-      // dp[targets[0].offset] += dp[offset] / divisor
-      i32 div_off = instr->offset;
-      i32 quot_off = instr->targets[0].offset;
-      i32 divisor = instr->arg;
+      // dp[div.targets[0].offset] += dp[div.src_offset] / div.divisor
+      i32 div_off = instr->div.src_offset;
+      i32 quot_off = instr->div.targets[0].offset;
+      i32 divisor = instr->div.divisor;
       int shift = get_shift(divisor);
 
       fprintf(output, "    ; div by %d\n", divisor);
@@ -303,10 +304,10 @@ void codegen_nasm(const Program *program, FILE *output) {
     }
 
     case OP_MOD: {
-      // dp[targets[0].offset] = dp[offset] % divisor
-      i32 div_off = instr->offset;
-      i32 rem_off = instr->targets[0].offset;
-      i32 divisor = instr->arg;
+      // dp[mod.targets[0].offset] = dp[mod.src_offset] % mod.divisor
+      i32 div_off = instr->mod.src_offset;
+      i32 rem_off = instr->mod.targets[0].offset;
+      i32 divisor = instr->mod.divisor;
       int shift = get_shift(divisor);
 
       fprintf(output, "    ; mod by %d\n", divisor);

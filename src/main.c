@@ -25,25 +25,75 @@ static void dump_instructions(const Program *program) {
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
 
-    printf("Instruction %d: %c %d %d", i, instr->op, instr->arg, instr->arg2);
-    if (instr->offset != 0) {
-      printf(" @%d", instr->offset);
-    }
-    if (instr->op == OP_TRANSFER) {
-      for (int t = 0; t < instr->arg; t++) {
-        printf(" (off=%d, fac=%d", instr->targets[t].offset,
-               instr->targets[t].factor);
-        if (instr->targets[t].bias != 0) {
-          printf(", bias=%d", instr->targets[t].bias);
+    printf("Instruction %d: %c", i, instr->op);
+
+    switch (instr->op) {
+    case OP_RIGHT:
+      printf(" %d", instr->right.distance);
+      break;
+    case OP_INC:
+      printf(" %d @%d", instr->inc.amount, instr->inc.offset);
+      break;
+    case OP_SET:
+      printf(" %d %d", instr->set.value, instr->set.count);
+      if (instr->set.offset != 0) {
+        printf(" @%d", instr->set.offset);
+      }
+      if (instr->set.count > 1 && instr->set.stride > 1) {
+        printf(" stride=%d", instr->set.stride);
+      }
+      break;
+    case OP_SEEK_EMPTY:
+      printf(" %d", instr->seek.step);
+      if (instr->seek.offset != 0) {
+        printf(" @%d", instr->seek.offset);
+      }
+      break;
+    case OP_LOOP:
+    case OP_END:
+      printf(" %d", instr->loop.match_addr);
+      if (instr->loop.offset != 0) {
+        printf(" @%d", instr->loop.offset);
+      }
+      break;
+    case OP_OUT:
+      if (instr->out.offset != 0) {
+        printf(" @%d", instr->out.offset);
+      }
+      break;
+    case OP_IN:
+      if (instr->in.offset != 0) {
+        printf(" @%d", instr->in.offset);
+      }
+      break;
+    case OP_TRANSFER:
+      printf(" %d %d", instr->transfer.target_count,
+             instr->transfer.is_assignment);
+      if (instr->transfer.src_offset != 0) {
+        printf(" @%d", instr->transfer.src_offset);
+      }
+      for (int t = 0; t < instr->transfer.target_count; t++) {
+        printf(" (off=%d, fac=%d", instr->transfer.targets[t].offset,
+               instr->transfer.targets[t].factor);
+        if (instr->transfer.targets[t].bias != 0) {
+          printf(", bias=%d", instr->transfer.targets[t].bias);
         }
         printf(")");
       }
-    } else if (instr->op == OP_DIV) {
-      printf(" ; div: dp[%d] += dp[%d] / %d", instr->targets[0].offset,
-             instr->offset, instr->arg);
-    } else if (instr->op == OP_MOD) {
-      printf(" ; mod: dp[%d] = dp[%d] %% %d", instr->targets[0].offset,
-             instr->offset, instr->arg);
+      break;
+    case OP_DIV:
+      printf(" %d @%d", instr->div.divisor, instr->div.src_offset);
+      printf(" ; div: dp[%d] += dp[%d] / %d", instr->div.targets[0].offset,
+             instr->div.src_offset, instr->div.divisor);
+      break;
+    case OP_MOD:
+      printf(" %d @%d", instr->mod.divisor, instr->mod.src_offset);
+      printf(" ; mod: dp[%d] = dp[%d] %% %d", instr->mod.targets[0].offset,
+             instr->mod.src_offset, instr->mod.divisor);
+      break;
+    default:
+      printf(" (unknown)");
+      break;
     }
     putchar('\n');
   }
