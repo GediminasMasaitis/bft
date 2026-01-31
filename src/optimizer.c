@@ -121,6 +121,78 @@
  * To enable: compile with -DUNSAFE_TRANSFER_CHAIN
  */
 
+static i32 get_offset(const Instruction *instr) {
+  switch (instr->op) {
+  case OP_INC:
+    return instr->inc.offset;
+  case OP_SET:
+    return instr->set.offset;
+  case OP_OUT:
+    return instr->out.offset;
+  case OP_IN:
+    return instr->in.offset;
+  case OP_SEEK_EMPTY:
+    return instr->seek.offset;
+  case OP_LOOP:
+  case OP_END:
+    return instr->loop.offset;
+  case OP_TRANSFER:
+    return instr->transfer.src_offset;
+  case OP_DIV:
+    return instr->div.src_offset;
+  case OP_MOD:
+    return instr->mod.src_offset;
+  default:
+    return 0;
+  }
+}
+
+static void set_offset(Instruction *instr, const i32 offset) {
+  switch (instr->op) {
+  case OP_INC:
+    instr->inc.offset = offset;
+    break;
+  case OP_SET:
+    instr->set.offset = offset;
+    break;
+  case OP_OUT:
+    instr->out.offset = offset;
+    break;
+  case OP_IN:
+    instr->in.offset = offset;
+    break;
+  case OP_SEEK_EMPTY:
+    instr->seek.offset = offset;
+    break;
+  case OP_LOOP:
+  case OP_END:
+    instr->loop.offset = offset;
+    break;
+  case OP_TRANSFER:
+    instr->transfer.src_offset = offset;
+    break;
+  case OP_DIV:
+    instr->div.src_offset = offset;
+    break;
+  case OP_MOD:
+    instr->mod.src_offset = offset;
+    break;
+  default:
+    break;
+  }
+}
+
+static i32 get_count(const Instruction *instr) {
+  switch (instr->op) {
+  case OP_RIGHT:
+    return instr->right.distance;
+  case OP_INC:
+    return instr->inc.amount;
+  default:
+    return 0;
+  }
+}
+
 /*******************************************************************************
  * PASS: INSTRUCTION FOLDING (merge_consecutive_right_inc)
  *
@@ -152,19 +224,20 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
     const Instruction instr = input->instructions[in_index];
 
     if (instr.op == op) {
-      /* Use generic access since op could be OP_RIGHT or OP_INC */
-      i32 count = instr.arg1;
-      i32 offset = instr.offset;
+      /* Use semantic accessors for count and offset */
+      i32 count = get_count(&instr);
+      i32 offset = (op == OP_INC) ? instr.inc.offset : 0;
 
       /* Accumulate consecutive operations of same type AND same offset */
       while (in_index + 1 < input->size) {
         const Instruction *next = &input->instructions[in_index + 1];
+        i32 next_offset = (op == OP_INC) ? next->inc.offset : 0;
 
-        if (next->op != instr.op || next->offset != offset) {
+        if (next->op != instr.op || next_offset != offset) {
           break;
         }
 
-        count += next->arg1;
+        count += get_count(next);
         in_index++;
       }
 
@@ -698,7 +771,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 
         /* INC/SET on different cell: can be moved before SET */
         if ((next->op == OP_INC || next->op == OP_SET) &&
-            next->offset != target_offset) {
+            get_offset(next) != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
           continue;
@@ -860,7 +933,8 @@ void optimize_offsets(Program *output, const Program *original) {
     case OP_TRANSFER:
     case OP_SEEK_EMPTY:
       output->instructions[out_index] = *instr;
-      output->instructions[out_index].offset = instr->offset + virtual_offset;
+      set_offset(&output->instructions[out_index],
+                 get_offset(instr) + virtual_offset);
 
       /* TRANSFER targets also need offset adjustment */
       if (instr->op == OP_TRANSFER) {
@@ -1090,7 +1164,7 @@ void eliminate_dead_stores(Program *output, const Program *input) {
 
     /* Only check writes: INC (modifies) and single-cell SET (assigns) */
     if ((curr->op == OP_INC || (curr->op == OP_SET && curr->set.count == 1))) {
-      i32 target_offset = curr->offset;
+      i32 target_offset = get_offset(curr);
       int is_dead = 0;
 
       for (addr_t j = i + 1; j < input->size; j++) {
@@ -1553,7 +1627,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
       is_candidate = 1;
     } else if (curr->op == OP_IN ||
                (curr->op == OP_SET && curr->set.count == 1)) {
-      temp_off = curr->offset;
+      temp_off = get_offset(curr);
       is_candidate = 1;
     }
 
@@ -1588,7 +1662,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           if ((future->op == OP_INC || future->op == OP_OUT ||
                future->op == OP_DIV || future->op == OP_MOD ||
                future->op == OP_IN) &&
-              future->offset == temp_off) {
+              get_offset(future) == temp_off) {
             break;
           }
 
@@ -1610,7 +1684,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           if (curr->op == OP_MOD || curr->op == OP_DIV) {
             output->instructions[out_index].div.targets[0].offset = final_off;
           } else {
-            output->instructions[out_index].offset = final_off;
+            set_offset(&output->instructions[out_index], final_off);
           }
           out_index++;
 
@@ -1769,7 +1843,7 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           /* Other temp uses invalidate */
           if ((future->op == OP_INC || future->op == OP_OUT ||
                future->op == OP_IN) &&
-              future->offset == temp_off) {
+              get_offset(future) == temp_off) {
             valid = 0;
             break;
           }
