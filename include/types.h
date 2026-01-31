@@ -75,7 +75,6 @@ typedef struct {
 
     struct {
       i32 step;
-      i32 _seek_pad;
       i32 offset;
     } seek;
 
@@ -83,41 +82,31 @@ typedef struct {
       i32 target_count;
       i32 is_assignment;
       i32 src_offset;
-      i32 _transfer_pad;
       TransferTarget targets[MAX_TRANSFER_TARGETS];
     } transfer;
 
     struct {
       i32 match_addr;
-      i32 _loop_pad;
       i32 offset;
     } loop;
 
     struct {
       i32 divisor;
-      i32 _div_pad;
       i32 src_offset;
-      i32 _div_pad2;
       TransferTarget targets[MAX_TRANSFER_TARGETS];
     } div;
 
     struct {
       i32 divisor;
-      i32 _mod_pad;
       i32 src_offset;
-      i32 _mod_pad2;
       TransferTarget targets[MAX_TRANSFER_TARGETS];
     } mod;
 
     struct {
-      i32 _in_pad1;
-      i32 _in_pad2;
       i32 offset;
     } in;
 
     struct {
-      i32 _out_pad1;
-      i32 _out_pad2;
       i32 offset;
     } out;
   };

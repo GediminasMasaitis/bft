@@ -224,7 +224,6 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
     const Instruction instr = input->instructions[in_index];
 
     if (instr.op == op) {
-      /* Use semantic accessors for count and offset */
       i32 count = get_count(&instr);
       i32 offset = (op == OP_INC) ? instr.inc.offset : 0;
 
