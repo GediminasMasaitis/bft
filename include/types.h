@@ -98,13 +98,13 @@ typedef struct {
     struct {
       i32 divisor;
       i32 src_offset;
-      TransferTarget targets[MAX_TRANSFER_TARGETS];
+      i32 dst_offset;
     } div;
 
     struct {
       i32 divisor;
       i32 src_offset;
-      TransferTarget targets[MAX_TRANSFER_TARGETS];
+      i32 dst_offset;
     } mod;
 
     struct {

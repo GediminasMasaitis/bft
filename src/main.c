@@ -88,12 +88,12 @@ static void dump_instructions(const Program *program) {
       break;
     case OP_DIV:
       printf(" %d @%d", instr->div.divisor, instr->div.src_offset);
-      printf(" ; div: dp[%d] += dp[%d] / %d", instr->div.targets[0].offset,
+      printf(" ; div: dp[%d] += dp[%d] / %d", instr->div.dst_offset,
              instr->div.src_offset, instr->div.divisor);
       break;
     case OP_MOD:
       printf(" %d @%d", instr->mod.divisor, instr->mod.src_offset);
-      printf(" ; mod: dp[%d] = dp[%d] %% %d", instr->mod.targets[0].offset,
+      printf(" ; mod: dp[%d] = dp[%d] %% %d", instr->mod.dst_offset,
              instr->mod.src_offset, instr->mod.divisor);
       break;
     default:

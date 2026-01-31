@@ -323,7 +323,7 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_DIV: {
       i32 div_off = instr->div.src_offset;
-      i32 quot_off = instr->div.targets[0].offset;
+      i32 quot_off = instr->div.dst_offset;
       i32 divisor = instr->div.divisor;
       int shift = get_shift(divisor);
 
@@ -338,7 +338,7 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_MOD: {
       i32 div_off = instr->mod.src_offset;
-      i32 rem_off = instr->mod.targets[0].offset;
+      i32 rem_off = instr->mod.dst_offset;
       i32 divisor = instr->mod.divisor;
       int shift = get_shift(divisor);
 

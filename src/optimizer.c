@@ -69,14 +69,14 @@
  * OP_DIV: Integer division (ADDS to quotient)
  *   div.divisor    = divisor
  *   div.src_offset = dividend cell offset
- *   div.targets[0].offset = quotient cell offset
- *   Effect: dp[div.targets[0].offset] += dp[div.src_offset] / div.divisor
+ *   div.dst_offset = quotient cell offset
+ *   Effect: dp[div.dst_offset] += dp[div.src_offset] / div.divisor
  *
  * OP_MOD: Integer modulo (ASSIGNS to remainder)
  *   mod.divisor    = divisor
  *   mod.src_offset = dividend cell offset
- *   mod.targets[0].offset = remainder cell offset
- *   Effect: dp[mod.targets[0].offset] = dp[mod.src_offset] % mod.divisor
+ *   mod.dst_offset = remainder cell offset
+ *   Effect: dp[mod.dst_offset] = dp[mod.src_offset] % mod.divisor
  *
  * =============================================================================
  * OPTIMIZATION PASSES
@@ -765,7 +765,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
         /* DIV/MOD: movable if they don't touch our target */
         if ((next->op == OP_DIV || next->op == OP_MOD) &&
             next->div.src_offset != target_offset &&
-            next->div.targets[0].offset != target_offset) {
+            next->div.dst_offset != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
           continue;
@@ -954,7 +954,7 @@ void optimize_offsets(Program *output, const Program *original) {
       output->instructions[out_index] = *instr;
       output->instructions[out_index].div.src_offset =
           instr->div.src_offset + virtual_offset;
-      output->instructions[out_index].div.targets[0].offset += virtual_offset;
+      output->instructions[out_index].div.dst_offset += virtual_offset;
       out_index++;
       break;
 
@@ -1075,7 +1075,7 @@ static int is_cell_assignment(const Instruction *instr, i32 offset) {
   if (instr->op == OP_IN && instr->in.offset == offset) {
     return 1;
   }
-  if (instr->op == OP_MOD && instr->mod.targets[0].offset == offset) {
+  if (instr->op == OP_MOD && instr->mod.dst_offset == offset) {
     return 1;
   }
   if (instr->op == OP_TRANSFER && instr->transfer.is_assignment == 1 &&
@@ -1561,7 +1561,7 @@ void optimize_divmod(Program *output, const Program *input) {
         div_out->op = OP_DIV;
         div_out->div.src_offset = dividend_off;
         div_out->div.divisor = divisor;
-        div_out->div.targets[0].offset = quotient_off;
+        div_out->div.dst_offset = quotient_off;
         out_index++;
 
         /* Emit MOD: remainder = dividend % divisor */
@@ -1569,7 +1569,7 @@ void optimize_divmod(Program *output, const Program *input) {
         mod_out->op = OP_MOD;
         mod_out->mod.src_offset = dividend_off;
         mod_out->mod.divisor = divisor;
-        mod_out->mod.targets[0].offset = remainder_off;
+        mod_out->mod.dst_offset = remainder_off;
         out_index++;
 
         /* Clear dividend (loop would have decremented it to 0) */
@@ -1624,7 +1624,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
     /* Identify instructions that write to a potential temp cell */
     if (curr->op == OP_MOD || curr->op == OP_DIV) {
-      temp_off = curr->div.targets[0].offset;
+      temp_off = curr->div.dst_offset;
       is_candidate = 1;
     } else if (curr->op == OP_IN ||
                (curr->op == OP_SET && curr->set.count == 1)) {
@@ -1683,7 +1683,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           /* Emit original instruction targeting final cell directly */
           output->instructions[out_index] = *curr;
           if (curr->op == OP_MOD || curr->op == OP_DIV) {
-            output->instructions[out_index].div.targets[0].offset = final_off;
+            output->instructions[out_index].div.dst_offset = final_off;
           } else {
             set_offset(&output->instructions[out_index], final_off);
           }
@@ -1933,8 +1933,7 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
     return instr->in.offset == offset;
   case OP_DIV:
   case OP_MOD:
-    return instr->div.src_offset == offset ||
-           instr->div.targets[0].offset == offset;
+    return instr->div.src_offset == offset || instr->div.dst_offset == offset;
   case OP_TRANSFER:
     if (instr->transfer.src_offset == offset)
       return 1;

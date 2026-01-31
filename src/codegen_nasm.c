@@ -281,9 +281,8 @@ void codegen_nasm(const Program *program, FILE *output) {
       break;
 
     case OP_DIV: {
-      // dp[div.targets[0].offset] += dp[div.src_offset] / div.divisor
       i32 div_off = instr->div.src_offset;
-      i32 quot_off = instr->div.targets[0].offset;
+      i32 quot_off = instr->div.dst_offset;
       i32 divisor = instr->div.divisor;
       int shift = get_shift(divisor);
 
@@ -304,9 +303,8 @@ void codegen_nasm(const Program *program, FILE *output) {
     }
 
     case OP_MOD: {
-      // dp[mod.targets[0].offset] = dp[mod.src_offset] % mod.divisor
       i32 div_off = instr->mod.src_offset;
-      i32 rem_off = instr->mod.targets[0].offset;
+      i32 rem_off = instr->mod.dst_offset;
       i32 divisor = instr->mod.divisor;
       int shift = get_shift(divisor);
 

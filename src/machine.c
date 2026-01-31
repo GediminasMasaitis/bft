@@ -196,21 +196,17 @@ status_t machine_run(Machine *machine) {
     }
 
     case OP_DIV: {
-      // dp[div.targets[0].offset] += dp[div.src_offset] / div.divisor
       cell_t *dividend = &machine->cells[machine->dp + instr->div.src_offset];
       cell_t divisor = (cell_t)instr->div.divisor;
-      cell_t *quotient =
-          &machine->cells[machine->dp + instr->div.targets[0].offset];
+      cell_t *quotient = &machine->cells[machine->dp + instr->div.dst_offset];
       *quotient += *dividend / divisor;
       break;
     }
 
     case OP_MOD: {
-      // dp[mod.targets[0].offset] = dp[mod.src_offset] % mod.divisor
       cell_t *dividend = &machine->cells[machine->dp + instr->mod.src_offset];
       cell_t divisor = (cell_t)instr->mod.divisor;
-      cell_t *remainder =
-          &machine->cells[machine->dp + instr->mod.targets[0].offset];
+      cell_t *remainder = &machine->cells[machine->dp + instr->mod.dst_offset];
       *remainder = *dividend % divisor;
       break;
     }
