@@ -17,7 +17,7 @@ status_t program_calculate_loops(Program *program) {
         return STATUS_UNMATCHED_END;
       }
       stack_size--;
-      addr_t open = stack[stack_size];
+      const addr_t open = stack[stack_size];
       program->instructions[open].loop.match_addr = i;
       program->instructions[i].end.match_addr = open;
     }
@@ -36,7 +36,7 @@ status_t simple_machine_to_program(Program *program,
   memset(program, 0, sizeof(*program));
 
   for (addr_t i = 0; i < machine->code_size; i++) {
-    op_t op = machine->code[i];
+    const op_t op = machine->code[i];
 
     switch (op) {
     case OP_RIGHT:
@@ -103,13 +103,13 @@ status_t simple_machine_to_program(Program *program,
 
 status_t machine_run(Machine *machine) {
   while (machine->ip < machine->program.size) {
-    Instruction *instr = &machine->program.instructions[machine->ip];
+    const Instruction *instr = &machine->program.instructions[machine->ip];
 
     switch (instr->op) {
     case OP_RIGHT:
 #ifndef UNSAFE
     {
-      i32 new_dp = machine->dp + instr->right.distance;
+      const i32 new_dp = machine->dp + instr->right.distance;
       if (new_dp < 0) {
         fprintf(
             stderr,
@@ -177,8 +177,8 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_TRANSFER: {
-      cell_t *src = &machine->cells[machine->dp + instr->transfer.src_offset];
-      cell_t v = *src;
+      const cell_t *src = &machine->cells[machine->dp + instr->transfer.src_offset];
+      const cell_t v = *src;
       const i32 is_assignment = instr->transfer.is_assignment;
       for (i32 t = 0; t < instr->transfer.target_count; t++) {
         const i32 offset = instr->transfer.targets[t].offset;
@@ -195,16 +195,16 @@ status_t machine_run(Machine *machine) {
     }
 
     case OP_DIV: {
-      cell_t *dividend = &machine->cells[machine->dp + instr->div.src_offset];
-      cell_t divisor = (cell_t)instr->div.divisor;
+      const cell_t *dividend = &machine->cells[machine->dp + instr->div.src_offset];
+      const cell_t divisor = (cell_t)instr->div.divisor;
       cell_t *quotient = &machine->cells[machine->dp + instr->div.dst_offset];
       *quotient += *dividend / divisor;
       break;
     }
 
     case OP_MOD: {
-      cell_t *dividend = &machine->cells[machine->dp + instr->mod.src_offset];
-      cell_t divisor = (cell_t)instr->mod.divisor;
+      const cell_t *dividend = &machine->cells[machine->dp + instr->mod.src_offset];
+      const cell_t divisor = (cell_t)instr->mod.divisor;
       cell_t *remainder = &machine->cells[machine->dp + instr->mod.dst_offset];
       *remainder = *dividend % divisor;
       break;

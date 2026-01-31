@@ -228,12 +228,12 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
 
     if (instr.op == op) {
       i32 count = get_count(&instr);
-      i32 offset = (op == OP_INC) ? instr.inc.offset : 0;
+      const i32 offset = (op == OP_INC) ? instr.inc.offset : 0;
 
       /* Accumulate consecutive operations of same type AND same offset */
       while (in_index + 1 < input->size) {
         const Instruction *next = &input->instructions[in_index + 1];
-        i32 next_offset = (op == OP_INC) ? next->inc.offset : 0;
+        const i32 next_offset = (op == OP_INC) ? next->inc.offset : 0;
 
         if (next->op != instr.op || next_offset != offset) {
           break;
@@ -302,9 +302,11 @@ void create_zeroing_sets(Program *output, const Program *input) {
 
       Instruction *out = &output->instructions[out_index];
       out->op = OP_SET;
-      out->set.value = 0; /* value to set */
-      out->set.count = 1; /* count = 1 cell */
-      in_index += 2;      /* Skip the INC and END */
+      out->set.value = 0;  /* value to set */
+      out->set.count = 1;  /* count = 1 cell */
+      out->set.offset = 0; /* at current dp */
+      out->set.stride = 0; /* N/A for count=1 */
+      in_index += 2;       /* Skip the INC and END */
     } else {
       output->instructions[out_index] = instr;
     }
@@ -375,6 +377,7 @@ void optimize_memset(Program *output, const Program *input) {
         out->op = OP_SET;
         out->set.value = in_set_val;
         out->set.count = count;
+        out->set.offset = instr.set.offset; /* Preserve original offset */
         out->set.stride = stride;
         out_index++;
 
@@ -641,15 +644,15 @@ void optimize_multi_transfer(Program *output, const Program *input) {
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     if (input->instructions[in_index].op == OP_LOOP) {
       TransferTarget targets[MAX_TRANSFER_TARGETS];
-      int num_targets = analyze_multi_transfer(input, in_index, targets);
+      const int num_targets = analyze_multi_transfer(input, in_index, targets);
 
       if (num_targets > 0) {
         /* Emit TRANSFER instruction */
         Instruction *xfer = &output->instructions[out_index];
         xfer->op = OP_TRANSFER;
         xfer->transfer.target_count = num_targets;
-        /* is_assignment defaults to 0 (additive mode), src_offset defaults to 0
-         * (source) */
+        xfer->transfer.is_assignment = 0; /* additive mode */
+        xfer->transfer.src_offset = 0;    /* source at dp */
 
         for (int t = 0; t < num_targets; t++) {
           xfer->transfer.targets[t] = targets[t];
@@ -660,13 +663,14 @@ void optimize_multi_transfer(Program *output, const Program *input) {
          */
         Instruction *set = &output->instructions[out_index];
         set->op = OP_SET;
-        set->set.value = 0; /* value */
-        set->set.count = 1; /* count = 1 cell */
-        set->set.offset = 0;
+        set->set.value = 0;  /* value */
+        set->set.count = 1;  /* count = 1 cell */
+        set->set.offset = 0; /* at dp */
+        set->set.stride = 0; /* N/A for count=1 */
         out_index++;
 
         /* Skip past the entire loop */
-        addr_t loop_len = get_loop_length(input, in_index);
+        const addr_t loop_len = get_loop_length(input, in_index);
         in_index += loop_len - 1;
 
         continue;
@@ -709,6 +713,10 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
   memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
+  /* Buffer for instructions to potentially move before SET */
+  Instruction moved_buffer[256];
+  int moved_count = 0;
+
   addr_t i = 0;
   while (i < original->size) {
     const Instruction *curr = &original->instructions[i];
@@ -717,6 +725,8 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
     if (curr->op == OP_SET && curr->set.count == 1) {
       i32 value = curr->set.value;
       const i32 target_offset = curr->set.offset;
+      int did_merge = 0;
+      moved_count = 0;
 
       addr_t j = i + 1;
       while (j < original->size) {
@@ -725,6 +735,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
         /* INC on same cell: fold into SET value */
         if (next->op == OP_INC && next->inc.offset == target_offset) {
           value += next->inc.count;
+          did_merge = 1;
           j++;
           continue;
         }
@@ -740,14 +751,14 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
           break;
         }
 
-        /* OUT on different cell: can be moved before SET */
+        /* OUT on different cell: buffer for potential move */
         if (next->op == OP_OUT && next->out.offset != target_offset) {
-          output->instructions[out_index++] = *next;
+          if (moved_count < 256) moved_buffer[moved_count++] = *next;
           j++;
           continue;
         }
 
-        /* TRANSFER: movable if it doesn't touch our target cell */
+        /* TRANSFER: buffer if it doesn't touch our target cell */
         if (next->op == OP_TRANSFER) {
           int touches_target = (next->transfer.src_offset == target_offset);
           for (int t = 0; t < next->transfer.target_count && !touches_target;
@@ -755,30 +766,30 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
             touches_target =
                 (next->transfer.targets[t].offset == target_offset);
           if (!touches_target) {
-            output->instructions[out_index++] = *next;
+            if (moved_count < 256) moved_buffer[moved_count++] = *next;
             j++;
             continue;
           }
           break;
         }
 
-        /* DIV/MOD: movable if they don't touch our target */
+        /* DIV/MOD: buffer if they don't touch our target */
         if ((next->op == OP_DIV || next->op == OP_MOD) &&
             next->div.src_offset != target_offset &&
             next->div.dst_offset != target_offset) {
-          output->instructions[out_index++] = *next;
+          if (moved_count < 256) moved_buffer[moved_count++] = *next;
           j++;
           continue;
         }
 
-        /* INC on different cell: can be moved before SET */
+        /* INC on different cell: buffer for potential move */
         if (next->op == OP_INC && get_offset(next) != target_offset) {
-          output->instructions[out_index++] = *next;
+          if (moved_count < 256) moved_buffer[moved_count++] = *next;
           j++;
           continue;
         }
 
-        /* Another SET on different cell: DON'T move it - causes oscillation */
+        /* Another SET on different cell: stop */
         if (next->op == OP_SET && get_offset(next) != target_offset) {
           break;
         }
@@ -787,14 +798,24 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
         break;
       }
 
-      /* Emit the merged SET with accumulated value */
-      Instruction *out = &output->instructions[out_index];
-      out->op = OP_SET;
-      out->set.value = value;
-      out->set.count = 1;
-      out->set.offset = target_offset;
-      out->set.stride = 0;
-      out_index++;
+      if (did_merge) {
+        /* Actually merged - emit buffered instructions, then merged SET */
+        for (int m = 0; m < moved_count; m++) {
+          output->instructions[out_index++] = moved_buffer[m];
+        }
+        Instruction *out = &output->instructions[out_index];
+        out->op = OP_SET;
+        out->set.value = value;
+        out->set.count = 1;
+        out->set.offset = target_offset;
+        out->set.stride = 0;
+        out_index++;
+      } else {
+        /* No merge - emit everything in original order */
+        for (addr_t k = i; k < j; k++) {
+          output->instructions[out_index++] = original->instructions[k];
+        }
+      }
 
       i = j;
       continue;
@@ -965,12 +986,12 @@ void optimize_offsets(Program *output, const Program *original) {
 
     case OP_LOOP: {
       i32 net_movement;
-      int is_balanced =
+      const int is_balanced =
           analyze_loop_balance(original, i, &net_movement) && net_movement == 0;
 
       if (is_balanced) {
         /* Balanced loop: maintain virtual offset through the loop */
-        i32 combined_offset = instr->loop.offset + virtual_offset;
+        const i32 combined_offset = instr->loop.offset + virtual_offset;
         loop_entry_offsets[loop_stack_size++] = virtual_offset;
 
         output->instructions[out_index] = *instr;
@@ -996,7 +1017,7 @@ void optimize_offsets(Program *output, const Program *original) {
     }
 
     case OP_END: {
-      i32 entry_virtual_offset = loop_entry_offsets[--loop_stack_size];
+      const i32 entry_virtual_offset = loop_entry_offsets[--loop_stack_size];
 
       if (entry_virtual_offset == -999999) {
         /* Exiting unbalanced loop: materialize any accumulated offset */
@@ -1016,7 +1037,7 @@ void optimize_offsets(Program *output, const Program *original) {
          * Exiting balanced loop: restore virtual offset to entry value.
          * Since loop is balanced, pointer is at same position as entry.
          */
-        i32 combined_offset = instr->end.offset + entry_virtual_offset;
+        const i32 combined_offset = instr->end.offset + entry_virtual_offset;
         virtual_offset = entry_virtual_offset;
 
         output->instructions[out_index] = *instr;
@@ -1071,7 +1092,7 @@ static int is_cell_assignment(const Instruction *instr, i32 offset) {
     if (offset < instr->set.offset) {
       return 0;
     }
-    i32 diff = offset - instr->set.offset;
+    const i32 diff = offset - instr->set.offset;
     if (diff % instr->set.stride != 0) {
       return 0;
     }
@@ -1171,7 +1192,7 @@ void eliminate_dead_stores(Program *output, const Program *input) {
 
     /* Only check writes: INC (modifies) and single-cell SET (assigns) */
     if ((curr->op == OP_INC || (curr->op == OP_SET && curr->set.count == 1))) {
-      i32 target_offset = get_offset(curr);
+      const i32 target_offset = get_offset(curr);
       int is_dead = 0;
 
       for (addr_t j = i + 1; j < input->size; j++) {
@@ -1258,7 +1279,7 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
           out_index++;
 
           /* Emit additive TRANSFER for remaining targets (if any) */
-          int remaining = next->transfer.target_count - 1;
+          const int remaining = next->transfer.target_count - 1;
           if (remaining > 0) {
             Instruction *xfer2 = &output->instructions[out_index];
             xfer2->op = OP_TRANSFER;
@@ -1398,20 +1419,8 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
         if (merge_inc_into_transfer(&merged, &input->instructions[i + 1])) {
           i++; /* Consumed this INC */
         } else {
-          const Instruction *inc = &input->instructions[i + 1];
-          int interferes = (inc->inc.offset == merged.transfer.src_offset);
-          for (int t = 0; t < merged.transfer.target_count && !interferes;
-               t++) {
-            if (inc->inc.offset == merged.transfer.targets[t].offset)
-              interferes = 1;
-          }
-          if (interferes) {
-            break;
-          } else {
-            /* Non-interfering, non-mergeable INC: pass through */
-            output->instructions[out_index++] = input->instructions[i + 1];
-            i++;
-          }
+          /* Can't merge - stop scanning forward. Don't reorder. */
+          break;
         }
       }
 
@@ -1583,6 +1592,7 @@ void optimize_divmod(Program *output, const Program *input) {
         set_out->set.value = 0;
         set_out->set.count = 1;
         set_out->set.offset = dividend_off;
+        set_out->set.stride = 0;
         out_index++;
 
         in_index += 5; /* Skip the 6 instructions of the pattern */
@@ -1647,7 +1657,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           next->transfer.src_offset == temp_off &&
           next->transfer.targets[0].factor == 1 &&
           next->transfer.targets[0].bias == 0) {
-        i32 final_off = next->transfer.targets[0].offset;
+        const i32 final_off = next->transfer.targets[0].offset;
 
         /* Look for terminating SET 0 @temp */
         addr_t set_idx = 0;
@@ -1740,8 +1750,8 @@ static int is_cell_known_zero(const Program *input, addr_t i, i32 offset) {
 
     /* Multi-cell SET might touch our offset */
     if (prev->op == OP_SET && prev->set.count > 1) {
-      i32 start = prev->set.offset;
-      i32 stride = prev->set.stride <= 1 ? 1 : prev->set.stride;
+      const i32 start = prev->set.offset;
+      const i32 stride = prev->set.stride <= 1 ? 1 : prev->set.stride;
       for (i32 c = 0; c < prev->set.count; c++) {
         if (start + c * stride == adjusted_offset) {
           return prev->set.value == 0;
@@ -1834,7 +1844,7 @@ void optimize_transfer_chain(Program *output, const Program *input) {
       /* Try each target as a potential temp cell */
       for (int temp_idx = 0; temp_idx < curr->transfer.target_count;
            temp_idx++) {
-        i32 temp_off = curr->transfer.targets[temp_idx].offset;
+        const i32 temp_off = curr->transfer.targets[temp_idx].offset;
         i32 F1 = curr->transfer.targets[temp_idx].factor;
         i32 B1 = curr->transfer.targets[temp_idx].bias;
 
@@ -2041,7 +2051,7 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
     if (offset < instr->set.offset) {
       return 0;
     }
-    i32 diff = offset - instr->set.offset;
+    const i32 diff = offset - instr->set.offset;
     if (diff % instr->set.stride != 0) {
       return 0;
     }
@@ -2103,7 +2113,7 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
       continue;
     }
 
-    i32 offset = instr->inc.offset;
+    const i32 offset = instr->inc.offset;
 
     for (addr_t j = i + 1; j < input->size; j++) {
       const Instruction *next = &input->instructions[j];
@@ -2167,6 +2177,14 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
  * - Dead store elimination may expose new merging opportunities
  * - Chain optimization may enable more dead store elimination
  ******************************************************************************/
+/* Wrapper functions for RUN_PASS macro */
+static void merge_right_wrapper(Program *out, const Program *in) {
+  merge_consecutive_right_inc(out, in, OP_RIGHT);
+}
+static void merge_inc_wrapper(Program *out, const Program *in) {
+  merge_consecutive_right_inc(out, in, OP_INC);
+}
+
 void optimize_program(Program *program) {
   Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
@@ -2175,10 +2193,9 @@ void optimize_program(Program *program) {
     memcpy(before_pass, program, sizeof(Program));
 
     /* Instruction folding - merge consecutive RIGHT and INC */
-    merge_consecutive_right_inc(optimized, program, OP_RIGHT);
+    merge_right_wrapper(optimized, program);
     *program = *optimized;
-
-    merge_consecutive_right_inc(optimized, program, OP_INC);
+    merge_inc_wrapper(optimized, program);
     *program = *optimized;
 
     /* Zeroing loop detection: [-] → SET 0 */

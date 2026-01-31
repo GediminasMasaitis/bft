@@ -4,7 +4,7 @@
 #include "bft.h"
 
 status_t simple_machine_step(SimpleMachine *machine) {
-  op_t instruction = machine->code[machine->ip];
+  const op_t instruction = machine->code[machine->ip];
   cell_t *cell = &machine->cells[machine->dp];
 
   switch (instruction) {
@@ -105,7 +105,7 @@ status_t simple_machine_load(SimpleMachine *machine, const op_t *code) {
         return STATUS_UNMATCHED_END;
       }
       stack_size--;
-      addr_t open = stack[stack_size];
+      const addr_t open = stack[stack_size];
       machine->loops[open] = i;
       machine->loops[i] = open;
     }

@@ -35,8 +35,8 @@ static int get_shift(int n) {
 }
 
 static void print_multiply_expr(FILE *output, const char *operand, int factor) {
-  int factor_abs = abs(factor);
-  int shift = get_shift(factor_abs);
+  const int factor_abs = abs(factor);
+  const int shift = get_shift(factor_abs);
 
   if (factor < 0) {
     fprintf(output, "-");
@@ -61,7 +61,7 @@ void codegen_c(const Program *program, FILE *output) {
   for (addr_t i = 0; i < program->size; i++) {
     const Instruction *instr = &program->instructions[i];
     if (instr->op == OP_LOOP) {
-      addr_t end_idx = instr->loop.match_addr;
+      const addr_t end_idx = instr->loop.match_addr;
       if (end_idx > 0 && program->instructions[end_idx - 1].op == OP_RIGHT) {
         skip[end_idx - 1] = 1;
         if (i > 0 && program->instructions[i - 1].op == OP_SET &&
@@ -153,7 +153,7 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_LOOP:
       print_c_indent(output, indent_level);
       {
-        addr_t end_idx = instr->loop.match_addr;
+        const addr_t end_idx = instr->loop.match_addr;
         if (end_idx > 0 && skip[end_idx - 1] && instr->loop.offset == 0) {
           const Instruction *right_instr = &program->instructions[end_idx - 1];
           if (i > 0 && skip[i - 1] &&
@@ -217,8 +217,8 @@ void codegen_c(const Program *program, FILE *output) {
 
     case OP_SEEK_EMPTY:
       print_c_indent(output, indent_level);
-      char sign = instr->seek.step >= 0 ? '+' : '-';
-      int step_abs = abs(instr->seek.step);
+      const char sign = instr->seek.step >= 0 ? '+' : '-';
+      const int step_abs = abs(instr->seek.step);
       if (instr->seek.offset == 0) {
         fprintf(output, "while (*dp != 0) dp %c= %d; // seek empty\n", sign,
                 step_abs);
@@ -231,11 +231,11 @@ void codegen_c(const Program *program, FILE *output) {
     case OP_TRANSFER:
       print_c_indent(output, indent_level);
       if (instr->transfer.target_count == 1) {
-        int is_assignment = instr->transfer.is_assignment;
-        int factor = instr->transfer.targets[0].factor;
-        int factor_abs = abs(factor);
-        int bias = instr->transfer.targets[0].bias;
-        int shift = get_shift(factor_abs);
+        const int is_assignment = instr->transfer.is_assignment;
+        const int factor = instr->transfer.targets[0].factor;
+        const int factor_abs = abs(factor);
+        const int bias = instr->transfer.targets[0].bias;
+        const int shift = get_shift(factor_abs);
 
         char src_operand[32];
         snprintf(src_operand, sizeof(src_operand), "dp[%d]",
@@ -259,17 +259,17 @@ void codegen_c(const Program *program, FILE *output) {
             }
           } else {
             if (shift > 0) {
-              char op = factor >= 0 ? '+' : '-';
+              const char op = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s << %d",
                       instr->transfer.targets[0].offset, op, src_operand,
                       shift);
             } else if (factor_abs == 1) {
-              char factor_sign = factor >= 0 ? '+' : '-';
+              const char factor_sign = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s",
                       instr->transfer.targets[0].offset, factor_sign,
                       src_operand);
             } else {
-              char factor_sign = factor >= 0 ? '+' : '-';
+              const char factor_sign = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s * %d",
                       instr->transfer.targets[0].offset, factor_sign,
                       src_operand, factor_abs);
@@ -283,11 +283,11 @@ void codegen_c(const Program *program, FILE *output) {
             print_c_indent(output, indent_level);
           }
 
-          int offset = instr->transfer.targets[t].offset;
-          int factor = instr->transfer.targets[t].factor;
-          int bias = instr->transfer.targets[t].bias;
-          int factor_abs = abs(factor);
-          int shift = get_shift(factor_abs);
+          const int offset = instr->transfer.targets[t].offset;
+          const int factor = instr->transfer.targets[t].factor;
+          const int bias = instr->transfer.targets[t].bias;
+          const int factor_abs = abs(factor);
+          const int shift = get_shift(factor_abs);
 
           char src_operand[32];
           snprintf(src_operand, sizeof(src_operand), "dp[%d]",
@@ -303,15 +303,15 @@ void codegen_c(const Program *program, FILE *output) {
             }
           } else {
             if (shift > 0) {
-              char op = factor >= 0 ? '+' : '-';
+              const char op = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s << %d", offset, op, src_operand,
                       shift);
             } else if (factor_abs == 1) {
-              char factor_sign = factor >= 0 ? '+' : '-';
+              const char factor_sign = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s", offset, factor_sign,
                       src_operand);
             } else {
-              char factor_sign = factor >= 0 ? '+' : '-';
+              const char factor_sign = factor >= 0 ? '+' : '-';
               fprintf(output, "dp[%d] %c= %s * %d", offset, factor_sign,
                       src_operand, factor_abs);
             }
@@ -322,10 +322,10 @@ void codegen_c(const Program *program, FILE *output) {
       break;
 
     case OP_DIV: {
-      i32 div_off = instr->div.src_offset;
-      i32 quot_off = instr->div.dst_offset;
-      i32 divisor = instr->div.divisor;
-      int shift = get_shift(divisor);
+      const i32 div_off = instr->div.src_offset;
+      const i32 quot_off = instr->div.dst_offset;
+      const i32 divisor = instr->div.divisor;
+      const int shift = get_shift(divisor);
 
       print_c_indent(output, indent_level);
       if (shift > 0) {
@@ -337,10 +337,10 @@ void codegen_c(const Program *program, FILE *output) {
     }
 
     case OP_MOD: {
-      i32 div_off = instr->mod.src_offset;
-      i32 rem_off = instr->mod.dst_offset;
-      i32 divisor = instr->mod.divisor;
-      int shift = get_shift(divisor);
+      const i32 div_off = instr->mod.src_offset;
+      const i32 rem_off = instr->mod.dst_offset;
+      const i32 divisor = instr->mod.divisor;
+      const int shift = get_shift(divisor);
 
       print_c_indent(output, indent_level);
       if (shift > 0) {

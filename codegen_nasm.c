@@ -194,9 +194,9 @@ void codegen_nasm(const Program *program, FILE *output) {
 
       if (instr->transfer.is_assignment && instr->transfer.target_count == 1) {
         // Assignment mode
-        i32 offset = instr->transfer.targets[0].offset;
-        i32 factor = instr->transfer.targets[0].factor;
-        i32 bias = instr->transfer.targets[0].bias;
+        const i32 offset = instr->transfer.targets[0].offset;
+        const i32 factor = instr->transfer.targets[0].factor;
+        const i32 bias = instr->transfer.targets[0].bias;
 
         if (factor == 1) {
           if (bias != 0) {
@@ -227,9 +227,9 @@ void codegen_nasm(const Program *program, FILE *output) {
         }
       } else {
         for (int t = 0; t < instr->transfer.target_count; t++) {
-          i32 bias = instr->transfer.targets[t].bias;
+          const i32 bias = instr->transfer.targets[t].bias;
           if (bias != 0) {
-            i32 offset = instr->transfer.targets[t].offset;
+            const i32 offset = instr->transfer.targets[t].offset;
             if (bias > 0) {
               fprintf(output, "    add byte [rbx%+d], %d\n", offset, bias);
             } else {
@@ -242,8 +242,8 @@ void codegen_nasm(const Program *program, FILE *output) {
         fprintf(output, "    jz .transfer_done_%d\n", i);
 
         for (int t = 0; t < instr->transfer.target_count; t++) {
-          i32 offset = instr->transfer.targets[t].offset;
-          i32 factor = instr->transfer.targets[t].factor;
+          const i32 offset = instr->transfer.targets[t].offset;
+          const i32 factor = instr->transfer.targets[t].factor;
 
           if (factor == 1) {
             fprintf(output, "    add byte [rbx%+d], al\n", offset);
@@ -281,10 +281,10 @@ void codegen_nasm(const Program *program, FILE *output) {
       break;
 
     case OP_DIV: {
-      i32 div_off = instr->div.src_offset;
-      i32 quot_off = instr->div.dst_offset;
-      i32 divisor = instr->div.divisor;
-      int shift = get_shift(divisor);
+      const i32 div_off = instr->div.src_offset;
+      const i32 quot_off = instr->div.dst_offset;
+      const i32 divisor = instr->div.divisor;
+      const int shift = get_shift(divisor);
 
       fprintf(output, "    ; div by %d\n", divisor);
       fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
@@ -303,10 +303,10 @@ void codegen_nasm(const Program *program, FILE *output) {
     }
 
     case OP_MOD: {
-      i32 div_off = instr->mod.src_offset;
-      i32 rem_off = instr->mod.dst_offset;
-      i32 divisor = instr->mod.divisor;
-      int shift = get_shift(divisor);
+      const i32 div_off = instr->mod.src_offset;
+      const i32 rem_off = instr->mod.dst_offset;
+      const i32 divisor = instr->mod.divisor;
+      const int shift = get_shift(divisor);
 
       fprintf(output, "    ; mod by %d\n", divisor);
       fprintf(output, "    movzx eax, byte [rbx%+d]\n", div_off);
