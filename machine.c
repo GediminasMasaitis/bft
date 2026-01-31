@@ -104,7 +104,6 @@ status_t simple_machine_to_program(Program *program,
 status_t machine_run(Machine *machine) {
   while (machine->ip < machine->program.size) {
     Instruction *instr = &machine->program.instructions[machine->ip];
-    cell_t *cell = &machine->cells[machine->dp];
 
     switch (instr->op) {
     case OP_RIGHT:
