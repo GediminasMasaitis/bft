@@ -62,8 +62,7 @@ typedef struct {
     } right;
 
     struct {
-      i32 amount;
-      i32 _inc_pad;
+      i32 count;
       i32 offset;
     } inc;
 
@@ -145,7 +144,8 @@ status_t simple_machine_load(SimpleMachine *machine, const op_t *code);
 status_t simple_machine_step(SimpleMachine *machine);
 status_t simple_machine_run(SimpleMachine *machine);
 
-status_t simple_machine_to_program(Program *program, const SimpleMachine *machine);
+status_t simple_machine_to_program(Program *program,
+                                   const SimpleMachine *machine);
 status_t machine_run(Machine *machine);
 status_t program_calculate_loops(Program *program);
 

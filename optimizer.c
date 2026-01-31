@@ -189,7 +189,7 @@ static i32 get_count(const Instruction *instr) {
   case OP_RIGHT:
     return instr->right.distance;
   case OP_INC:
-    return instr->inc.amount;
+    return instr->inc.count;
   default:
     return 0;
   }
@@ -249,7 +249,7 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
         if (op == OP_RIGHT) {
           out->right.distance = count;
         } else { /* OP_INC */
-          out->inc.amount = count;
+          out->inc.count = count;
           out->inc.offset = offset;
         }
         out_index++;
@@ -295,7 +295,7 @@ void create_zeroing_sets(Program *output, const Program *input) {
     /* Pattern: LOOP, INC(odd), END */
     if (instr.op == OP_LOOP && in_index + 2 < input->size &&
         input->instructions[in_index + 1].op == OP_INC &&
-        (input->instructions[in_index + 1].inc.amount &
+        (input->instructions[in_index + 1].inc.count &
          1) && /* LSB=1 means odd */
         input->instructions[in_index + 2].op == OP_END) {
 
@@ -528,7 +528,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
       int found = 0;
       for (int j = 0; j < num_entries; j++) {
         if (offsets[j] == current_offset) {
-          factors[j] += instr->inc.amount;
+          factors[j] += instr->inc.count;
           found = 1;
           break;
         }
@@ -537,7 +537,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
         if (num_entries >= MAX_TRANSFER_TARGETS + 1)
           return 0; /* Too many distinct offsets */
         offsets[num_entries] = current_offset;
-        factors[num_entries] = instr->inc.amount;
+        factors[num_entries] = instr->inc.count;
         num_entries++;
       }
     } break;
@@ -723,7 +723,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 
         /* INC on same cell: fold into SET value */
         if (next->op == OP_INC && next->inc.offset == target_offset) {
-          value += next->inc.amount;
+          value += next->inc.count;
           j++;
           continue;
         }
@@ -1315,7 +1315,7 @@ static int merge_inc_into_transfer(Instruction *transfer,
   }
 
   if (target_idx >= 0) {
-    transfer->transfer.targets[target_idx].bias += inc->inc.amount;
+    transfer->transfer.targets[target_idx].bias += inc->inc.count;
     return 1;
   }
 
@@ -1323,7 +1323,7 @@ static int merge_inc_into_transfer(Instruction *transfer,
   if (inc->inc.offset == transfer->transfer.src_offset) {
     for (int t = 0; t < transfer->transfer.target_count; t++) {
       transfer->transfer.targets[t].bias +=
-          inc->inc.amount * transfer->transfer.targets[t].factor;
+          inc->inc.count * transfer->transfer.targets[t].factor;
     }
     return 1;
   }
@@ -1466,7 +1466,7 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
   }
 
   /* Must decrement dividend by 1 */
-  if (inc_instr->op != OP_INC || inc_instr->inc.amount != -1 ||
+  if (inc_instr->op != OP_INC || inc_instr->inc.count != -1 ||
       inc_instr->inc.offset != loop_instr->loop.offset) {
     return 0;
   }
@@ -1991,7 +1991,7 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
       /* Found another INC on same cell - merge */
       if (next->op == OP_INC && next->inc.offset == offset) {
         skip[i] = 1;
-        adjust[j] += instr->inc.amount;
+        adjust[j] += instr->inc.count;
         break;
       }
 
@@ -2010,8 +2010,8 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
 
     Instruction out_instr = input->instructions[i];
     if (out_instr.op == OP_INC) {
-      out_instr.inc.amount += adjust[i];
-      if (out_instr.inc.amount == 0) {
+      out_instr.inc.count += adjust[i];
+      if (out_instr.inc.count == 0) {
         continue; /* INC 0 is a no-op */
       }
     }

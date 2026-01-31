@@ -57,26 +57,26 @@ void codegen_nasm(const Program *program, FILE *output) {
 
     case OP_INC:
       if (instr->inc.offset == 0) {
-        if (instr->inc.amount == 1) {
+        if (instr->inc.count == 1) {
           fprintf(output, "    inc byte [rbx]\n");
-        } else if (instr->inc.amount == -1) {
+        } else if (instr->inc.count == -1) {
           fprintf(output, "    dec byte [rbx]\n");
-        } else if (instr->inc.amount > 0) {
-          fprintf(output, "    add byte [rbx], %d\n", instr->inc.amount);
+        } else if (instr->inc.count > 0) {
+          fprintf(output, "    add byte [rbx], %d\n", instr->inc.count);
         } else {
-          fprintf(output, "    sub byte [rbx], %d\n", -instr->inc.amount);
+          fprintf(output, "    sub byte [rbx], %d\n", -instr->inc.count);
         }
       } else {
-        if (instr->inc.amount == 1) {
+        if (instr->inc.count == 1) {
           fprintf(output, "    inc byte [rbx%+d]\n", instr->inc.offset);
-        } else if (instr->inc.amount == -1) {
+        } else if (instr->inc.count == -1) {
           fprintf(output, "    dec byte [rbx%+d]\n", instr->inc.offset);
-        } else if (instr->inc.amount > 0) {
+        } else if (instr->inc.count > 0) {
           fprintf(output, "    add byte [rbx%+d], %d\n", instr->inc.offset,
-                  instr->inc.amount);
+                  instr->inc.count);
         } else {
           fprintf(output, "    sub byte [rbx%+d], %d\n", instr->inc.offset,
-                  -instr->inc.amount);
+                  -instr->inc.count);
         }
       }
       break;

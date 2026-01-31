@@ -65,7 +65,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = OP_INC;
-      program->instructions[program->size].inc.amount = 1;
+      program->instructions[program->size].inc.count = 1;
       program->size++;
       break;
 
@@ -75,7 +75,7 @@ status_t simple_machine_to_program(Program *program,
         return STATUS_CODE_TOO_LARGE;
       }
       program->instructions[program->size].op = OP_INC;
-      program->instructions[program->size].inc.amount = -1;
+      program->instructions[program->size].inc.count = -1;
       program->size++;
       break;
 
@@ -131,7 +131,7 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_INC:
-      machine->cells[machine->dp + instr->inc.offset] += instr->inc.amount;
+      machine->cells[machine->dp + instr->inc.offset] += instr->inc.count;
       break;
 
     case OP_OUT:

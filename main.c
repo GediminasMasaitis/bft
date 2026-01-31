@@ -29,7 +29,7 @@ static void dump_instructions(const Program *program) {
       printf(" %d", instr->right.distance);
       break;
     case OP_INC:
-      printf(" %d @%d", instr->inc.amount, instr->inc.offset);
+      printf(" %d @%d", instr->inc.count, instr->inc.offset);
       break;
     case OP_SET:
       printf(" %d %d", instr->set.value, instr->set.count);
