@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "machine.h"
+#include "bft.h"
 
 status_t simple_machine_step(SimpleMachine *machine) {
   op_t instruction = machine->code[machine->ip];

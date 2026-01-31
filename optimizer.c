@@ -109,8 +109,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "machine.h"
-#include "optimizer.h"
+#include "bft.h"
 
 /*
  * UNSAFE_TRANSFER_CHAIN: When defined, enables aggressive transfer chain

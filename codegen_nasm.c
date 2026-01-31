@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#include "codegen.h"
+#include "bft.h"
 
 static const i32 use_shift_and_mask = 1;
 

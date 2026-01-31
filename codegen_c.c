@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "codegen.h"
+#include "bft.h"
 
 static void print_c_indent(FILE *output, int level) {
   for (int i = 0; i < level; i++) {

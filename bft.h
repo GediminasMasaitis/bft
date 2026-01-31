@@ -1,5 +1,7 @@
 #pragma once
+
 #include <stdint.h>
+#include <stdio.h>
 
 typedef char i8;
 typedef unsigned char u8;
@@ -17,7 +19,6 @@ typedef enum {
   OP_END = ']',
   OP_DONE = '\0',
 
-  // IR opcodes
   OP_MOVE = OP_RIGHT,
   OP_ADD = OP_INC,
   OP_SET = '=',
@@ -121,3 +122,35 @@ typedef struct {
   Instruction instructions[MAX_CODE_SIZE];
   addr_t size;
 } Program;
+
+typedef struct {
+  op_t code[MAX_CODE_SIZE];
+  addr_t code_size;
+
+  cell_t cells[CELL_COUNT];
+  addr_t loops[MAX_CODE_SIZE];
+  addr_t ip;
+  addr_t dp;
+} SimpleMachine;
+
+typedef struct {
+  Program program;
+
+  cell_t cells[CELL_COUNT];
+  addr_t ip;
+  addr_t dp;
+} Machine;
+
+status_t simple_machine_load(SimpleMachine *machine, const op_t *code);
+status_t simple_machine_step(SimpleMachine *machine);
+status_t simple_machine_run(SimpleMachine *machine);
+
+status_t simple_machine_to_program(Program *program, const SimpleMachine *machine);
+status_t machine_run(Machine *machine);
+status_t program_calculate_loops(Program *program);
+
+void optimize_program(Program *program);
+
+void codegen_c(const Program *program, FILE *output);
+
+void codegen_nasm(const Program *program, FILE *output);

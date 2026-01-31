@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "machine.h"
+#include "bft.h"
 
 status_t program_calculate_loops(Program *program) {
   addr_t stack[MAX_CODE_SIZE];

@@ -16,7 +16,9 @@ $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f *.o $(TARGET)
+	rm -f *.o
+	rm -f *.s
+	rm -f ./$(TARGET)
 
 format:
 	dos2unix *.c *.h Makefile

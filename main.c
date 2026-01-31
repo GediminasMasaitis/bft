@@ -3,10 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "codegen.h"
-#include "machine.h"
-#include "optimizer.h"
-#include "types.h"
+#include "bft.h"
 
 static void print_usage(const char *prog_name) {
   fprintf(stderr, "Usage: %s [options] <file.bf>\n", prog_name);
