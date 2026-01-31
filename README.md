@@ -1,24 +1,45 @@
 # BFT - Brainfuck Toolset
 
-### To "decompile" and run C version
+Optimizing Brainfuck interpreter with C and x86-64 assembly backends.
+
+## Build
+
 ```bash
 make
-./bft -c -o mandelbrot.c ./b/mandelbrot.b
+```
+
+## Usage
+
+```
+bft [options] <file.b>
+
+Options:
+  -r, --run         Run the program (default)
+  -c, --emit-c      Generate C code
+  -s, --emit-asm    Generate NASM assembly
+  -o, --output FILE Write output to FILE
+  -d, --dump        Dump optimized instructions
+  -h, --help        Show help
+```
+
+## Examples
+
+Run directly:
+```bash
+./bft ./programs/mandelbrot.b
+```
+
+Compile to C:
+```bash
+./bft -c -o mandelbrot.c ./programs/mandelbrot.b
 gcc -O3 -o mandelbrot mandelbrot.c
 ./mandelbrot
 ```
 
-### To transpile and run ASM version
+Compile to assembly:
 ```bash
-make
-./bft -s -o mandelbrot.s ./b/mandelbrot.b
-nasm -f elf64 -o mandelbrot.o ./mandelbrot.s
-ld -o mandelbrot ./mandelbrot.o
+./bft -s -o mandelbrot.s ./programs/mandelbrot.b
+nasm -f elf64 -o mandelbrot.o mandelbrot.s
+ld -o mandelbrot mandelbrot.o
 ./mandelbrot
-```
-
-### To run interpreter
-```bash
-make
-./bft ./b/mandelbrot.b
 ```
