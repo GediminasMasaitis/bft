@@ -1,9 +1,8 @@
 CC = gcc
-CFLAGS = -std=c11 -O3 -I./include
+CFLAGS = -std=c11 -O3
 LDFLAGS =
 
-SRCDIR = src
-SOURCES = $(wildcard $(SRCDIR)/*.c)
+SOURCES = $(wildcard *.c)
 OBJECTS = $(SOURCES:.c=.o)
 
 TARGET = bft
@@ -13,13 +12,12 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
 
-$(SRCDIR)/%.o: $(SRCDIR)/%.c
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(SRCDIR)/*.o $(TARGET)
-	rm -f bft
+	rm -f *.o $(TARGET)
 
 format:
-	dos2unix $(SRCDIR)/*.c include/*.h Makefile
-	clang-format -i $(SRCDIR)/*.c include/*.h
+	dos2unix *.c *.h Makefile
+	clang-format -i *.c *.h
