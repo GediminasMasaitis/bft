@@ -115,9 +115,10 @@
  * UNSAFE_TRANSFER_CHAIN: When defined, enables aggressive transfer chain
  * optimization that assumes temp cells start at zero without verification.
  * This produces smaller output but may cause incorrect behavior for some
- * programs (e.g., golden.b). Default is safe mode (undefined).
+ * programs (e.g., golden.b). Default is safe mode which verifies temp cells
+ * are zero by scanning backward through the instruction stream.
  *
- * To enable: compile with -DUNSAFE_TRANSFER_CHAIN
+ * To enable unsafe mode: compile with -DUNSAFE_TRANSFER_CHAIN
  */
 
 static i32 get_offset(const Instruction *instr) {
@@ -1709,6 +1710,87 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 }
 
 /*******************************************************************************
+ * HELPER: IS CELL KNOWN ZERO
+ *
+ * Determines if a cell at a given offset is provably zero before instruction i.
+ * Scans backward, adjusting the offset when crossing RIGHT instructions.
+ *
+ * For transfer chain optimization, we've already found SET 0 @temp at set_idx,
+ * which clears temp at end of each loop iteration. We just need to verify
+ * temp was zero before the loop (for the first iteration).
+ *
+ * Returns: 1 if cell is provably zero, 0 otherwise
+ ******************************************************************************/
+static int is_cell_known_zero(const Program *input, addr_t i, i32 offset) {
+  i32 adjusted_offset = offset;
+
+  for (addr_t k = i; k > 0; k--) {
+    const Instruction *prev = &input->instructions[k - 1];
+
+    /* SET at the adjusted offset */
+    if (prev->op == OP_SET && prev->set.count == 1 &&
+        prev->set.offset == adjusted_offset) {
+      return prev->set.value == 0;
+    }
+
+    /* Multi-cell SET might touch our offset */
+    if (prev->op == OP_SET && prev->set.count > 1) {
+      i32 start = prev->set.offset;
+      i32 stride = prev->set.stride <= 1 ? 1 : prev->set.stride;
+      for (i32 c = 0; c < prev->set.count; c++) {
+        if (start + c * stride == adjusted_offset) {
+          return prev->set.value == 0;
+        }
+      }
+    }
+
+    /* INC modifies the cell */
+    if (prev->op == OP_INC && prev->inc.offset == adjusted_offset) {
+      return 0;
+    }
+
+    /* IN writes to the cell */
+    if (prev->op == OP_IN && prev->in.offset == adjusted_offset) {
+      return 0;
+    }
+
+    /* TRANSFER might write to the cell */
+    if (prev->op == OP_TRANSFER) {
+      for (int t = 0; t < prev->transfer.target_count; t++) {
+        if (prev->transfer.targets[t].offset == adjusted_offset) {
+          return 0;
+        }
+      }
+    }
+
+    /* DIV/MOD write to dst_offset */
+    if ((prev->op == OP_DIV || prev->op == OP_MOD) &&
+        prev->div.dst_offset == adjusted_offset) {
+      return 0;
+    }
+
+    /* LOOP: continue scanning to verify cell was zero before loop */
+    if (prev->op == OP_LOOP) {
+      continue;
+    }
+
+    /* RIGHT: adjust offset and continue (undoing the pointer movement) */
+    if (prev->op == OP_RIGHT) {
+      adjusted_offset += prev->right.distance;
+      continue;
+    }
+
+    /* END/SEEK_EMPTY: can't analyze through these */
+    if (prev->op == OP_END || prev->op == OP_SEEK_EMPTY) {
+      return 0;
+    }
+  }
+
+  /* Reached beginning of program - all cells start at zero */
+  return 1;
+}
+
+/*******************************************************************************
  * PASS: TRANSFER CHAIN OPTIMIZATION (optimize_transfer_chain)
  *
  * Optimizes chains of transfers through temporary cells by composing the
@@ -1812,17 +1894,50 @@ void optimize_transfer_chain(Program *output, const Program *input) {
               future->transfer.src_offset == temp_off &&
               future->transfer.is_assignment == 1 &&
               future->transfer.target_count == 1) {
-#ifdef UNSAFE_TRANSFER_CHAIN
-            /* UNSAFE: Assumes temp starts at zero without verification.
-             * If it restores source exactly, that's OK */
+            /*
+             * For assignment transfer: final = temp * F2 + B2
+             * If temp started at 0, then after additive transfer:
+             *   temp = 0 + source * F1 + B1 = source * F1 + B1
+             * So: final = (source * F1 + B1) * F2 + B2
+             *           = source * (F1*F2) + (B1*F2 + B2)
+             *
+             * We can safely compose if we can prove temp was zero.
+             */
             i32 F2 = future->transfer.targets[0].factor;
             i32 B2 = future->transfer.targets[0].bias;
+
+#ifdef UNSAFE_TRANSFER_CHAIN
+            /* UNSAFE: Only handle source restoration case without verification */
             if (future->transfer.targets[0].offset == source_off &&
                 F1 * F2 == 1 && B1 * F2 + B2 == 0) {
               source_restored = 1;
               continue;
             }
+#else
+            /* Safe mode: verify temp is zero, then compose */
+            if (is_cell_known_zero(input, i, temp_off)) {
+              if (num_collected >= MAX_TRANSFER_TARGETS) {
+                valid = 0;
+                break;
+              }
+
+              /* Compose the factors and biases */
+              collected[num_collected].offset =
+                  future->transfer.targets[0].offset;
+              collected[num_collected].factor = F1 * F2;
+              collected[num_collected].bias = B1 * F2 + B2;
+
+              /* Check if this restores source (factor=1, bias=0 to source) */
+              if (future->transfer.targets[0].offset == source_off &&
+                  collected[num_collected].factor == 1 &&
+                  collected[num_collected].bias == 0) {
+                source_restored = 1;
+              }
+              num_collected++;
+              continue;
+            }
 #endif
+
             valid = 0;
             break;
           }
