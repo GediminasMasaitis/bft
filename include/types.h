@@ -21,10 +21,6 @@ typedef enum {
   // Extended
 
   OP_SET = '=',
-  // arg1: value
-  // arg2: count
-  // offset: offset from data pointer
-
   OP_SEEK_EMPTY = 'E',
   OP_TRANSFER = 'T',
   OP_DIV = '/',
