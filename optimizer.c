@@ -451,7 +451,7 @@ void optimize_seek_empty(Program *output, const Program *input) {
  *
  * Used by optimize_multi_transfer to skip over processed loops.
  ******************************************************************************/
-static addr_t get_loop_length(const Program *output, addr_t input) {
+static addr_t get_loop_length(const Program *output, const addr_t input) {
   int depth = 0;
   addr_t i = input;
 
@@ -505,7 +505,7 @@ static addr_t get_loop_length(const Program *output, addr_t input) {
  *
  * Returns: number of transfer targets (0 if not a valid transfer loop)
  ******************************************************************************/
-static int analyze_multi_transfer(const Program *program, addr_t loop_start,
+static int analyze_multi_transfer(const Program *program, const addr_t loop_start,
                                   TransferTarget *targets) {
   /* Start after the LOOP instruction (caller already verified it's OP_LOOP) */
   addr_t i = loop_start + 1;
@@ -844,7 +844,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
  * Returns: 1 if the loop can be analyzed, 0 otherwise
  * Sets *net_movement to the total pointer displacement per iteration
  ******************************************************************************/
-static int analyze_loop_balance(const Program *program, addr_t loop_start,
+static int analyze_loop_balance(const Program *program, const addr_t loop_start,
                                 i32 *net_movement) {
   /* Caller already verified program->instructions[loop_start].op == OP_LOOP */
   i32 movement = 0;
@@ -1078,7 +1078,7 @@ void optimize_offsets(Program *output, const Program *original) {
  *   - MOD (assigns remainder to target)
  *   - Assignment-mode TRANSFER with single target (arg2 == 1, arg == 1)
  ******************************************************************************/
-static int is_cell_assignment(const Instruction *instr, i32 offset) {
+static int is_cell_assignment(const Instruction *instr, const i32 offset) {
   if (instr->op == OP_SET) {
     if (instr->set.count == 1) {
       /* Single-cell SET */
@@ -1124,7 +1124,7 @@ static int is_cell_assignment(const Instruction *instr, i32 offset) {
  * Returns 1 (conservatively assumes usage) for control flow instructions
  * since we can't reliably track what happens inside loops.
  ******************************************************************************/
-static int instruction_uses_cell(const Instruction *instr, i32 offset) {
+static int instruction_uses_cell(const Instruction *instr, const i32 offset) {
   switch (instr->op) {
   case OP_INC:
     return instr->inc.offset == offset;
@@ -1455,7 +1455,7 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
  * Returns 1 if pattern matches, 0 otherwise.
  * Sets output parameters to the relevant cell offsets and divisor value.
  ******************************************************************************/
-static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
+static int analyze_divmod_pattern(const Program *program, const addr_t loop_start,
                                   i32 *dividend_off, i32 *divisor,
                                   i32 *quotient_off, i32 *remainder_off,
                                   i32 *temp_off) {
@@ -1736,7 +1736,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
  *
  * Returns: 1 if cell is provably zero, 0 otherwise
  ******************************************************************************/
-static int is_cell_known_zero(const Program *input, addr_t i, i32 offset) {
+static int is_cell_known_zero(const Program *input, const addr_t i, const i32 offset) {
   i32 adjusted_offset = offset;
 
   for (addr_t k = i; k > 0; k--) {

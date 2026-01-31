@@ -4,7 +4,7 @@
 
 static const i32 use_shift_and_mask = 1;
 
-static int get_shift(int n) {
+static int get_shift(const int n) {
   if (!use_shift_and_mask) {
     return -1;
   }
