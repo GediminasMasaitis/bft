@@ -19,7 +19,7 @@ status_t program_calculate_loops(Program *program) {
       stack_size--;
       addr_t open = stack[stack_size];
       program->instructions[open].loop.match_addr = i;
-      program->instructions[i].loop.match_addr = open;
+      program->instructions[i].end.match_addr = open;
     }
   }
 
@@ -151,8 +151,8 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_END:
-      if (machine->cells[machine->dp + instr->loop.offset] != 0) {
-        machine->ip = instr->loop.match_addr;
+      if (machine->cells[machine->dp + instr->end.offset] != 0) {
+        machine->ip = instr->end.match_addr;
       }
       break;
 

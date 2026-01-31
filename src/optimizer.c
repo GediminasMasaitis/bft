@@ -134,8 +134,9 @@ static i32 get_offset(const Instruction *instr) {
   case OP_SEEK_EMPTY:
     return instr->seek.offset;
   case OP_LOOP:
-  case OP_END:
     return instr->loop.offset;
+  case OP_END:
+    return instr->end.offset;
   case OP_TRANSFER:
     return instr->transfer.src_offset;
   case OP_DIV:
@@ -165,8 +166,10 @@ static void set_offset(Instruction *instr, const i32 offset) {
     instr->seek.offset = offset;
     break;
   case OP_LOOP:
-  case OP_END:
     instr->loop.offset = offset;
+    break;
+  case OP_END:
+    instr->end.offset = offset;
     break;
   case OP_TRANSFER:
     instr->transfer.src_offset = offset;
@@ -1001,18 +1004,18 @@ void optimize_offsets(Program *output, const Program *original) {
         }
 
         output->instructions[out_index] = *instr;
-        output->instructions[out_index].loop.offset = instr->loop.offset;
+        output->instructions[out_index].end.offset = instr->end.offset;
         out_index++;
       } else {
         /*
          * Exiting balanced loop: restore virtual offset to entry value.
          * Since loop is balanced, pointer is at same position as entry.
          */
-        i32 combined_offset = instr->loop.offset + entry_virtual_offset;
+        i32 combined_offset = instr->end.offset + entry_virtual_offset;
         virtual_offset = entry_virtual_offset;
 
         output->instructions[out_index] = *instr;
-        output->instructions[out_index].loop.offset = combined_offset;
+        output->instructions[out_index].end.offset = combined_offset;
         out_index++;
       }
       break;
@@ -1456,11 +1459,10 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
   const Instruction *end_instr = &program->instructions[loop_start + 5];
 
   /* Verify END matches LOOP */
-  if (end_instr->op != OP_END ||
-      end_instr->loop.match_addr != (i32)loop_start) {
+  if (end_instr->op != OP_END || end_instr->end.match_addr != (i32)loop_start) {
     return 0;
   }
-  if (end_instr->loop.offset != loop_instr->loop.offset) {
+  if (end_instr->end.offset != loop_instr->loop.offset) {
     return 0;
   }
 

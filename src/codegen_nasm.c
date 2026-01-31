@@ -118,13 +118,13 @@ void codegen_nasm(const Program *program, FILE *output) {
       break;
 
     case OP_END:
-      if (instr->loop.offset == 0) {
+      if (instr->end.offset == 0) {
         fprintf(output, "    cmp byte [rbx], 0\n");
       } else {
-        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->loop.offset);
+        fprintf(output, "    cmp byte [rbx%+d], 0\n", instr->end.offset);
       }
-      fprintf(output, "    jne .loop%d_start\n", instr->loop.match_addr);
-      fprintf(output, ".loop%d_end:\n", instr->loop.match_addr);
+      fprintf(output, "    jne .loop%d_start\n", instr->end.match_addr);
+      fprintf(output, ".loop%d_end:\n", instr->end.match_addr);
       break;
 
     case OP_SET:

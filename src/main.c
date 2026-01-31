@@ -50,10 +50,15 @@ static void dump_instructions(const Program *program) {
       }
       break;
     case OP_LOOP:
-    case OP_END:
       printf(" %d", instr->loop.match_addr);
       if (instr->loop.offset != 0) {
         printf(" @%d", instr->loop.offset);
+      }
+      break;
+    case OP_END:
+      printf(" %d", instr->end.match_addr);
+      if (instr->end.offset != 0) {
+        printf(" @%d", instr->end.offset);
       }
       break;
     case OP_OUT:
