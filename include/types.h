@@ -57,10 +57,10 @@ typedef struct {
   op_t op;
   union {
     struct {
-      i32 arg;
+      i32 arg1;
       i32 arg2;
       i32 offset;
-      i32 stride;
+      i32 arg4;
       TransferTarget targets[MAX_TRANSFER_TARGETS];
     };
 

@@ -153,7 +153,7 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
 
     if (instr.op == op) {
       /* Use generic access since op could be OP_RIGHT or OP_INC */
-      i32 count = instr.arg;
+      i32 count = instr.arg1;
       i32 offset = instr.offset;
 
       /* Accumulate consecutive operations of same type AND same offset */
@@ -164,7 +164,7 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
           break;
         }
 
-        count += next->arg;
+        count += next->arg1;
         in_index++;
       }
 
