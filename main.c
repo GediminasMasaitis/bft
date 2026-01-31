@@ -102,20 +102,22 @@ static void dump_instructions(const Program *program) {
   putchar('\n');
 }
 
-enum { MODE_RUN, MODE_EMIT_C, MODE_EMIT_ASM } mode;
+enum { MODE_RUN, MODE_EMIT_C, MODE_EMIT_ASM };
 
 int main(int argc, char **argv) {
-  mode = MODE_RUN;
+  int mode = MODE_RUN;
   const char *output_path = NULL;
   int dump = 0;
+  status_t status = STATUS_OK;
 
-  static struct option long_options[] = {{"run", no_argument, 0, 'r'},
-                                         {"emit-c", no_argument, 0, 'c'},
-                                         {"emit-asm", no_argument, 0, 's'},
-                                         {"output", required_argument, 0, 'o'},
-                                         {"dump", no_argument, 0, 'd'},
-                                         {"help", no_argument, 0, 'h'},
-                                         {0, 0, 0, 0}};
+  static const struct option long_options[] = {
+      {"run", no_argument, 0, 'r'},
+      {"emit-c", no_argument, 0, 'c'},
+      {"emit-asm", no_argument, 0, 's'},
+      {"output", required_argument, 0, 'o'},
+      {"dump", no_argument, 0, 'd'},
+      {"help", no_argument, 0, 'h'},
+      {0, 0, 0, 0}};
 
   int opt;
   while ((opt = getopt_long(argc, argv, "rcso:dh", long_options, NULL)) != -1) {
@@ -152,34 +154,45 @@ int main(int argc, char **argv) {
 
   const char *input_path = argv[optind];
 
-  op_t code[MAX_CODE_SIZE] = {0};
+  op_t *code = calloc(MAX_CODE_SIZE, sizeof(op_t));
+  SimpleMachine *simple_machine = malloc(sizeof(SimpleMachine));
+  Machine *machine = calloc(1, sizeof(Machine));
+
+  if (!code || !simple_machine || !machine) {
+    fprintf(stderr, "Error: Out of memory\n");
+    status = 1;
+    goto cleanup;
+  }
+
   FILE *file = fopen(input_path, "r");
   if (!file) {
     fprintf(stderr, "Error: Could not open file %s\n", input_path);
-    return 1;
+    status = 1;
+    goto cleanup;
   }
-  size_t read_size = fread((void *)code, 1, MAX_CODE_SIZE - 1, file);
-  (void)read_size;
+  size_t read_size = fread(code, 1, MAX_CODE_SIZE - 1, file);
+  if (read_size == 0 && ferror(file)) {
+    fprintf(stderr, "Error: Failed to read file %s\n", input_path);
+    fclose(file);
+    status = 1;
+    goto cleanup;
+  }
   fclose(file);
 
-  SimpleMachine simple_machine;
-  const status_t simple_load_status =
-      simple_machine_load(&simple_machine, code);
-  if (simple_load_status != STATUS_OK) {
-    return simple_load_status;
+  status = simple_machine_load(simple_machine, code);
+  if (status != STATUS_OK) {
+    goto cleanup;
   }
 
-  Machine machine = {0};
-  const status_t load_status =
-      simple_machine_to_program(&machine.program, &simple_machine);
-  if (load_status != STATUS_OK) {
-    return load_status;
+  status = simple_machine_to_program(&machine->program, simple_machine);
+  if (status != STATUS_OK) {
+    goto cleanup;
   }
 
-  optimize_program(&machine.program);
+  optimize_program(&machine->program);
 
   if (dump) {
-    dump_instructions(&machine.program);
+    dump_instructions(&machine->program);
   }
 
   FILE *output = stdout;
@@ -187,20 +200,20 @@ int main(int argc, char **argv) {
     output = fopen(output_path, "w");
     if (!output) {
       fprintf(stderr, "Error: Could not open %s for writing\n", output_path);
-      return 1;
+      status = 1;
+      goto cleanup;
     }
   }
 
-  status_t status = STATUS_OK;
   switch (mode) {
   case MODE_RUN:
-    status = machine_run(&machine);
+    status = machine_run(machine);
     break;
   case MODE_EMIT_C:
-    codegen_c(&machine.program, output);
+    codegen_c(&machine->program, output);
     break;
   case MODE_EMIT_ASM:
-    codegen_nasm(&machine.program, output);
+    codegen_nasm(&machine->program, output);
     break;
   }
 
@@ -208,5 +221,9 @@ int main(int argc, char **argv) {
     fclose(output);
   }
 
+cleanup:
+  free(code);
+  free(simple_machine);
+  free(machine);
   return status;
 }
