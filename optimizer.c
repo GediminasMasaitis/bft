@@ -771,12 +771,16 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
           continue;
         }
 
-        /* INC/SET on different cell: can be moved before SET */
-        if ((next->op == OP_INC || next->op == OP_SET) &&
-            get_offset(next) != target_offset) {
+        /* INC on different cell: can be moved before SET */
+        if (next->op == OP_INC && get_offset(next) != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
           continue;
+        }
+
+        /* Another SET on different cell: DON'T move it - causes oscillation */
+        if (next->op == OP_SET && get_offset(next) != target_offset) {
+          break;
         }
 
         /* Unknown op or touches our cell: stop */
@@ -789,6 +793,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
       out->set.value = value;
       out->set.count = 1;
       out->set.offset = target_offset;
+      out->set.stride = 0;
       out_index++;
 
       i = j;
