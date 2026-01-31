@@ -10,91 +10,80 @@
  * INSTRUCTION FIELD REFERENCE
  * =============================================================================
  *
- * Each Instruction has: op, arg, arg2, offset, stride, targets[]
+ * Each Instruction has a union with named struct members for clarity:
  *
  * OP_RIGHT: Move data pointer
- *   arg    = amount to move (positive=right, negative=left)
- *   arg2   = (unused)
- *   offset = (unused)
- *   Effect: dp += arg
+ *   right.distance = amount to move (positive=right, negative=left)
+ *   Effect: dp += right.distance
  *
  * OP_INC: Increment/decrement cell
- *   arg    = amount to add (positive=increment, negative=decrement)
- *   arg2   = (unused)
- *   offset = cell offset from dp
- *   Effect: dp[offset] += arg
+ *   inc.amount = amount to add (positive=increment, negative=decrement)
+ *   inc.offset = cell offset from dp
+ *   Effect: dp[inc.offset] += inc.amount
  *
  * OP_OUT: Output cell as character
- *   arg    = (unused)
- *   arg2   = (unused)
- *   offset = cell offset from dp
- *   Effect: putchar(dp[offset])
+ *   out.offset = cell offset from dp
+ *   Effect: putchar(dp[out.offset])
  *
  * OP_IN: Input character to cell
- *   arg    = (unused)
- *   arg2   = (unused)
- *   offset = cell offset from dp
- *   Effect: dp[offset] = getchar()
+ *   in.offset = cell offset from dp
+ *   Effect: dp[in.offset] = getchar()
  *
  * OP_LOOP: Begin loop (jump to END if cell is zero)
- *   arg    = index of matching END instruction
- *   arg2   = (unused)
- *   offset = cell offset to test
- *   Effect: if (dp[offset] == 0) jump to arg
+ *   loop.match_addr = index of matching END instruction
+ *   loop.offset     = cell offset to test
+ *   Effect: if (dp[loop.offset] == 0) jump to loop.match_addr
  *
  * OP_END: End loop (jump to LOOP if cell is non-zero)
- *   arg    = index of matching LOOP instruction
- *   arg2   = (unused)
- *   offset = cell offset to test
- *   Effect: if (dp[offset] != 0) jump to arg
+ *   loop.match_addr = index of matching LOOP instruction
+ *   loop.offset     = cell offset to test
+ *   Effect: if (dp[loop.offset] != 0) jump to loop.match_addr
  *
  * OP_SET: Set cell(s) to a value
- *   arg    = value to set
- *   arg2   = count of cells (1 for single cell)
- *   offset = starting cell offset from dp
- *   stride = distance between cells (for arg2 > 1)
- *   Effect: if (arg2 <= 1) dp[offset] = arg
- *           else for i in 0..arg2-1: dp[offset + i*stride] = arg
+ *   set.value  = value to set
+ *   set.count  = number of cells (1 for single cell)
+ *   set.offset = starting cell offset from dp
+ *   set.stride = distance between cells (for set.count > 1)
+ *   Effect: if (set.count <= 1) dp[set.offset] = set.value
+ *           else for i in 0..set.count-1: dp[set.offset + i*set.stride] =
+ * set.value
  *
  * OP_SEEK_EMPTY: Scan for zero cell
- *   arg    = stride (amount to move each step, positive or negative)
- *   arg2   = (unused)
- *   offset = cell offset to test
- *   Effect: while (dp[offset] != 0) dp += arg
+ *   seek.step   = stride (amount to move each step, positive or negative)
+ *   seek.offset = cell offset to test
+ *   Effect: while (dp[seek.offset] != 0) dp += seek.step
  *
  * OP_TRANSFER: Transfer/multiply value to target cells
- *   arg    = number of targets
- *   arg2   = mode: 0=additive (+=), 1=assignment (=)
- *   offset = source cell offset
- *   targets[i].offset = target cell offset
- *   targets[i].factor = multiplication factor
- *   targets[i].bias   = constant to add
- *   Effect: src = dp[offset]
+ *   transfer.target_count  = number of targets
+ *   transfer.is_assignment = mode: 0=additive (+=), 1=assignment (=)
+ *   transfer.src_offset    = source cell offset
+ *   transfer.targets[i].offset = target cell offset
+ *   transfer.targets[i].factor = multiplication factor
+ *   transfer.targets[i].bias   = constant to add
+ *   Effect: src = dp[transfer.src_offset]
  *           for each target t:
- *             if (arg2 == 1): dp[t.offset] = src * t.factor + t.bias
- *             else:           dp[t.offset] += src * t.factor + t.bias
- *   NOTE: Source cell is READ but NOT MODIFIED
+ *             if (transfer.is_assignment == 1): dp[t.offset] = src * t.factor +
+ * t.bias else:                             dp[t.offset] += src * t.factor +
+ * t.bias NOTE: Source cell is READ but NOT MODIFIED
  *
  * OP_DIV: Integer division (ADDS to quotient)
- *   arg    = divisor
- *   arg2   = (unused)
- *   offset = dividend cell offset
- *   targets[0].offset = quotient cell offset
- *   Effect: dp[targets[0].offset] += dp[offset] / arg
+ *   div.divisor    = divisor
+ *   div.src_offset = dividend cell offset
+ *   div.targets[0].offset = quotient cell offset
+ *   Effect: dp[div.targets[0].offset] += dp[div.src_offset] / div.divisor
  *
  * OP_MOD: Integer modulo (ASSIGNS to remainder)
- *   arg    = divisor
- *   arg2   = (unused)
- *   offset = dividend cell offset
- *   targets[0].offset = remainder cell offset
- *   Effect: dp[targets[0].offset] = dp[offset] % arg
+ *   mod.divisor    = divisor
+ *   mod.src_offset = dividend cell offset
+ *   mod.targets[0].offset = remainder cell offset
+ *   Effect: dp[mod.targets[0].offset] = dp[mod.src_offset] % mod.divisor
  *
  * =============================================================================
  * OPTIMIZATION PASSES
  * =============================================================================
  *
  * 1. INSTRUCTION FOLDING: Consecutive identical operations are merged
- *    (e.g., "+++" becomes INC with arg=3)
+ *    (e.g., "+++" becomes INC with amount=3)
  *
  * 2. IDIOM RECOGNITION: Common patterns are replaced with single instructions
  *    (e.g., "[-]" becomes SET 0, "[>]" becomes SEEK_EMPTY)
@@ -163,6 +152,7 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
     const Instruction instr = input->instructions[in_index];
 
     if (instr.op == op) {
+      /* Use generic access since op could be OP_RIGHT or OP_INC */
       i32 count = instr.arg;
       i32 offset = instr.offset;
 
@@ -180,9 +170,14 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
 
       /* Skip emitting no-ops (e.g., when +5 and -5 cancel out) */
       if (count != 0) {
-        output->instructions[out_index].op = instr.op;
-        output->instructions[out_index].arg = count;
-        output->instructions[out_index].offset = offset;
+        Instruction *out = &output->instructions[out_index];
+        out->op = instr.op;
+        if (op == OP_RIGHT) {
+          out->right.distance = count;
+        } else { /* OP_INC */
+          out->inc.amount = count;
+          out->inc.offset = offset;
+        }
         out_index++;
       }
     } else {
@@ -226,13 +221,15 @@ void create_zeroing_sets(Program *output, const Program *input) {
     /* Pattern: LOOP, INC(odd), END */
     if (instr.op == OP_LOOP && in_index + 2 < input->size &&
         input->instructions[in_index + 1].op == OP_INC &&
-        (input->instructions[in_index + 1].arg & 1) && /* LSB=1 means odd */
+        (input->instructions[in_index + 1].inc.amount &
+         1) && /* LSB=1 means odd */
         input->instructions[in_index + 2].op == OP_END) {
 
-      output->instructions[out_index].op = OP_SET;
-      output->instructions[out_index].arg = 0;  /* value to set */
-      output->instructions[out_index].arg2 = 1; /* count = 1 cell */
-      in_index += 2;                            /* Skip the INC and END */
+      Instruction *out = &output->instructions[out_index];
+      out->op = OP_SET;
+      out->set.value = 0; /* value to set */
+      out->set.count = 1; /* count = 1 cell */
+      in_index += 2;      /* Skip the INC and END */
     } else {
       output->instructions[out_index] = instr;
     }
@@ -268,7 +265,7 @@ void optimize_memset(Program *output, const Program *input) {
     const Instruction instr = input->instructions[in_index];
 
     if (instr.op == OP_SET) {
-      const i32 in_set_val = instr.arg;
+      const i32 in_set_val = instr.set.value;
       i32 count = 1;
       i32 stride = 0;
 
@@ -280,13 +277,13 @@ void optimize_memset(Program *output, const Program *input) {
         const Instruction *next_set = &input->instructions[j + 2];
 
         if (right->op == OP_RIGHT && next_set->op == OP_SET &&
-            next_set->arg == in_set_val) {
+            next_set->set.value == in_set_val) {
           /* First pair establishes the stride */
           if (stride == 0) {
-            stride = right->arg;
+            stride = right->right.distance;
           }
           /* Continue only if stride is consistent */
-          if (right->arg == stride) {
+          if (right->right.distance == stride) {
             count++;
             j += 2;
           } else {
@@ -299,10 +296,11 @@ void optimize_memset(Program *output, const Program *input) {
 
       /* Only emit combined SET if we found 2+ cells */
       if (count >= 2) {
-        output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = in_set_val;
-        output->instructions[out_index].arg2 = count;
-        output->instructions[out_index].stride = stride;
+        Instruction *out = &output->instructions[out_index];
+        out->op = OP_SET;
+        out->set.value = in_set_val;
+        out->set.count = count;
+        out->set.stride = stride;
         out_index++;
 
         /*
@@ -310,8 +308,9 @@ void optimize_memset(Program *output, const Program *input) {
          * Original: SET, RIGHT, SET, RIGHT, ..., SET (no trailing RIGHT)
          * Net movement: (count-1) * stride
          */
-        output->instructions[out_index].op = OP_RIGHT;
-        output->instructions[out_index].arg = (count - 1) * stride;
+        Instruction *right_out = &output->instructions[out_index];
+        right_out->op = OP_RIGHT;
+        right_out->right.distance = (count - 1) * stride;
         out_index++;
         in_index = j;
         continue;
@@ -352,9 +351,10 @@ void optimize_seek_empty(Program *output, const Program *input) {
         input->instructions[in_index + 1].op == OP_RIGHT &&
         input->instructions[in_index + 2].op == OP_END) {
 
-      output->instructions[out_index].op = OP_SEEK_EMPTY;
-      output->instructions[out_index].arg =
-          input->instructions[in_index + 1].arg; /* stride/direction */
+      Instruction *out = &output->instructions[out_index];
+      out->op = OP_SEEK_EMPTY;
+      out->seek.step = input->instructions[in_index + 1]
+                           .right.distance; /* stride/direction */
       in_index += 2;
     } else {
       output->instructions[out_index] = instr;
@@ -446,7 +446,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
 
     switch (instr->op) {
     case OP_RIGHT:
-      current_offset += instr->arg;
+      current_offset += instr->right.distance;
       break;
 
     case OP_INC: {
@@ -454,7 +454,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
       int found = 0;
       for (int j = 0; j < num_entries; j++) {
         if (offsets[j] == current_offset) {
-          factors[j] += instr->arg;
+          factors[j] += instr->inc.amount;
           found = 1;
           break;
         }
@@ -463,7 +463,7 @@ static int analyze_multi_transfer(const Program *program, addr_t loop_start,
         if (num_entries >= MAX_TRANSFER_TARGETS + 1)
           return 0; /* Too many distinct offsets */
         offsets[num_entries] = current_offset;
-        factors[num_entries] = instr->arg;
+        factors[num_entries] = instr->inc.amount;
         num_entries++;
       }
     } break;
@@ -570,22 +570,24 @@ void optimize_multi_transfer(Program *output, const Program *input) {
 
       if (num_targets > 0) {
         /* Emit TRANSFER instruction */
-        output->instructions[out_index].op = OP_TRANSFER;
-        output->instructions[out_index].arg =
-            num_targets; /* number of targets */
-        /* arg2 defaults to 0 (additive mode), offset defaults to 0 (source) */
+        Instruction *xfer = &output->instructions[out_index];
+        xfer->op = OP_TRANSFER;
+        xfer->transfer.target_count = num_targets;
+        /* is_assignment defaults to 0 (additive mode), src_offset defaults to 0
+         * (source) */
 
         for (int t = 0; t < num_targets; t++) {
-          output->instructions[out_index].targets[t] = targets[t];
+          xfer->transfer.targets[t] = targets[t];
         }
         out_index++;
 
         /* Emit SET 0 to zero the source cell (TRANSFER doesn't modify source)
          */
-        output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = 0;  /* value */
-        output->instructions[out_index].arg2 = 1; /* count = 1 cell */
-        output->instructions[out_index].offset = 0;
+        Instruction *set = &output->instructions[out_index];
+        set->op = OP_SET;
+        set->set.value = 0; /* value */
+        set->set.count = 1; /* count = 1 cell */
+        set->set.offset = 0;
         out_index++;
 
         /* Skip past the entire loop */
@@ -636,24 +638,24 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
   while (i < original->size) {
     const Instruction *curr = &original->instructions[i];
 
-    /* Look for single-cell SET instructions (arg2 == 1) */
-    if (curr->op == OP_SET && curr->arg2 == 1) {
-      i32 value = curr->arg;
-      const i32 target_offset = curr->offset;
+    /* Look for single-cell SET instructions (count == 1) */
+    if (curr->op == OP_SET && curr->set.count == 1) {
+      i32 value = curr->set.value;
+      const i32 target_offset = curr->set.offset;
 
       addr_t j = i + 1;
       while (j < original->size) {
         const Instruction *next = &original->instructions[j];
 
         /* INC on same cell: fold into SET value */
-        if (next->op == OP_INC && next->offset == target_offset) {
-          value += next->arg;
+        if (next->op == OP_INC && next->inc.offset == target_offset) {
+          value += next->inc.amount;
           j++;
           continue;
         }
 
         /* Another SET to same cell: stop (it would override us) */
-        if (next->op == OP_SET && next->offset == target_offset) {
+        if (next->op == OP_SET && next->set.offset == target_offset) {
           break;
         }
 
@@ -664,7 +666,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
         }
 
         /* OUT on different cell: can be moved before SET */
-        if (next->op == OP_OUT && next->offset != target_offset) {
+        if (next->op == OP_OUT && next->out.offset != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
           continue;
@@ -672,9 +674,11 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 
         /* TRANSFER: movable if it doesn't touch our target cell */
         if (next->op == OP_TRANSFER) {
-          int touches_target = (next->offset == target_offset);
-          for (int t = 0; t < next->arg && !touches_target; t++)
-            touches_target = (next->targets[t].offset == target_offset);
+          int touches_target = (next->transfer.src_offset == target_offset);
+          for (int t = 0; t < next->transfer.target_count && !touches_target;
+               t++)
+            touches_target =
+                (next->transfer.targets[t].offset == target_offset);
           if (!touches_target) {
             output->instructions[out_index++] = *next;
             j++;
@@ -685,8 +689,8 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 
         /* DIV/MOD: movable if they don't touch our target */
         if ((next->op == OP_DIV || next->op == OP_MOD) &&
-            next->offset != target_offset &&
-            next->targets[0].offset != target_offset) {
+            next->div.src_offset != target_offset &&
+            next->div.targets[0].offset != target_offset) {
           output->instructions[out_index++] = *next;
           j++;
           continue;
@@ -705,10 +709,11 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
       }
 
       /* Emit the merged SET with accumulated value */
-      output->instructions[out_index].op = OP_SET;
-      output->instructions[out_index].arg = value;
-      output->instructions[out_index].arg2 = 1;
-      output->instructions[out_index].offset = target_offset;
+      Instruction *out = &output->instructions[out_index];
+      out->op = OP_SET;
+      out->set.value = value;
+      out->set.count = 1;
+      out->set.offset = target_offset;
       out_index++;
 
       i = j;
@@ -750,7 +755,7 @@ static int analyze_loop_balance(const Program *program, addr_t loop_start,
 
     switch (instr->op) {
     case OP_RIGHT:
-      movement += instr->arg;
+      movement += instr->right.distance;
       break;
 
     case OP_LOOP:
@@ -844,7 +849,7 @@ void optimize_offsets(Program *output, const Program *original) {
     switch (instr->op) {
     case OP_RIGHT:
       /* Accumulate into virtual offset instead of emitting */
-      virtual_offset += instr->arg;
+      virtual_offset += instr->right.distance;
       break;
 
     /* Operations that can take an offset - add virtual offset */
@@ -859,8 +864,9 @@ void optimize_offsets(Program *output, const Program *original) {
 
       /* TRANSFER targets also need offset adjustment */
       if (instr->op == OP_TRANSFER) {
-        for (int t = 0; t < instr->arg; t++) {
-          output->instructions[out_index].targets[t].offset += virtual_offset;
+        for (int t = 0; t < instr->transfer.target_count; t++) {
+          output->instructions[out_index].transfer.targets[t].offset +=
+              virtual_offset;
         }
       }
 
@@ -870,8 +876,9 @@ void optimize_offsets(Program *output, const Program *original) {
     case OP_DIV:
     case OP_MOD:
       output->instructions[out_index] = *instr;
-      output->instructions[out_index].offset = instr->offset + virtual_offset;
-      output->instructions[out_index].targets[0].offset += virtual_offset;
+      output->instructions[out_index].div.src_offset =
+          instr->div.src_offset + virtual_offset;
+      output->instructions[out_index].div.targets[0].offset += virtual_offset;
       out_index++;
       break;
 
@@ -882,18 +889,18 @@ void optimize_offsets(Program *output, const Program *original) {
 
       if (is_balanced) {
         /* Balanced loop: maintain virtual offset through the loop */
-        i32 combined_offset = instr->offset + virtual_offset;
+        i32 combined_offset = instr->loop.offset + virtual_offset;
         loop_entry_offsets[loop_stack_size++] = virtual_offset;
 
         output->instructions[out_index] = *instr;
-        output->instructions[out_index].offset = combined_offset;
+        output->instructions[out_index].loop.offset = combined_offset;
         out_index++;
       } else {
         /* Unbalanced loop: must materialize offset before entering */
         if (virtual_offset != 0) {
-          output->instructions[out_index].op = OP_RIGHT;
-          output->instructions[out_index].arg = virtual_offset;
-          output->instructions[out_index].offset = 0;
+          Instruction *right_out = &output->instructions[out_index];
+          right_out->op = OP_RIGHT;
+          right_out->right.distance = virtual_offset;
           out_index++;
           virtual_offset = 0;
         }
@@ -901,7 +908,7 @@ void optimize_offsets(Program *output, const Program *original) {
         loop_entry_offsets[loop_stack_size++] = -999999; /* Sentinel */
 
         output->instructions[out_index] = *instr;
-        output->instructions[out_index].offset = instr->offset;
+        output->instructions[out_index].loop.offset = instr->loop.offset;
         out_index++;
       }
       break;
@@ -913,26 +920,26 @@ void optimize_offsets(Program *output, const Program *original) {
       if (entry_virtual_offset == -999999) {
         /* Exiting unbalanced loop: materialize any accumulated offset */
         if (virtual_offset != 0) {
-          output->instructions[out_index].op = OP_RIGHT;
-          output->instructions[out_index].arg = virtual_offset;
-          output->instructions[out_index].offset = 0;
+          Instruction *right_out = &output->instructions[out_index];
+          right_out->op = OP_RIGHT;
+          right_out->right.distance = virtual_offset;
           out_index++;
           virtual_offset = 0;
         }
 
         output->instructions[out_index] = *instr;
-        output->instructions[out_index].offset = instr->offset;
+        output->instructions[out_index].loop.offset = instr->loop.offset;
         out_index++;
       } else {
         /*
          * Exiting balanced loop: restore virtual offset to entry value.
          * Since loop is balanced, pointer is at same position as entry.
          */
-        i32 combined_offset = instr->offset + entry_virtual_offset;
+        i32 combined_offset = instr->loop.offset + entry_virtual_offset;
         virtual_offset = entry_virtual_offset;
 
         output->instructions[out_index] = *instr;
-        output->instructions[out_index].offset = combined_offset;
+        output->instructions[out_index].loop.offset = combined_offset;
         out_index++;
       }
       break;
@@ -947,8 +954,9 @@ void optimize_offsets(Program *output, const Program *original) {
 
   /* Emit any remaining virtual offset at program end */
   if (virtual_offset != 0) {
-    output->instructions[out_index].op = OP_RIGHT;
-    output->instructions[out_index].arg = virtual_offset;
+    Instruction *right_out = &output->instructions[out_index];
+    right_out->op = OP_RIGHT;
+    right_out->right.distance = virtual_offset;
     out_index++;
   }
 
@@ -970,31 +978,33 @@ void optimize_offsets(Program *output, const Program *original) {
  ******************************************************************************/
 static int is_cell_assignment(const Instruction *instr, i32 offset) {
   if (instr->op == OP_SET) {
-    if (instr->arg2 == 1) {
+    if (instr->set.count == 1) {
       /* Single-cell SET */
-      return instr->offset == offset;
+      return instr->set.offset == offset;
     }
     /* Multi-cell SET: check if offset is in the range being set */
-    if (instr->stride <= 1) {
-      return offset >= instr->offset && offset < instr->offset + instr->arg2;
+    if (instr->set.stride <= 1) {
+      return offset >= instr->set.offset &&
+             offset < instr->set.offset + instr->set.count;
     }
-    if (offset < instr->offset) {
+    if (offset < instr->set.offset) {
       return 0;
     }
-    i32 diff = offset - instr->offset;
-    if (diff % instr->stride != 0) {
+    i32 diff = offset - instr->set.offset;
+    if (diff % instr->set.stride != 0) {
       return 0;
     }
-    return diff / instr->stride < instr->arg2;
+    return diff / instr->set.stride < instr->set.count;
   }
-  if (instr->op == OP_IN && instr->offset == offset) {
+  if (instr->op == OP_IN && instr->in.offset == offset) {
     return 1;
   }
-  if (instr->op == OP_MOD && instr->targets[0].offset == offset) {
+  if (instr->op == OP_MOD && instr->mod.targets[0].offset == offset) {
     return 1;
   }
-  if (instr->op == OP_TRANSFER && instr->arg2 == 1 && instr->arg == 1 &&
-      instr->targets[0].offset == offset) {
+  if (instr->op == OP_TRANSFER && instr->transfer.is_assignment == 1 &&
+      instr->transfer.target_count == 1 &&
+      instr->transfer.targets[0].offset == offset) {
     return 1;
   }
   return 0;
@@ -1015,8 +1025,10 @@ static int is_cell_assignment(const Instruction *instr, i32 offset) {
 static int instruction_uses_cell(const Instruction *instr, i32 offset) {
   switch (instr->op) {
   case OP_INC:
+    return instr->inc.offset == offset;
+
   case OP_OUT:
-    return instr->offset == offset;
+    return instr->out.offset == offset;
 
   case OP_SET:
     return 0; /* SET only writes, never reads */
@@ -1026,16 +1038,17 @@ static int instruction_uses_cell(const Instruction *instr, i32 offset) {
 
   case OP_DIV:
   case OP_MOD:
-    return instr->offset == offset; /* Reads dividend */
+    return instr->div.src_offset == offset; /* Reads dividend */
 
   case OP_TRANSFER:
     /* Reads source cell */
-    if (instr->offset == offset)
+    if (instr->transfer.src_offset == offset)
       return 1;
-    /* Additive TRANSFER (arg2 == 0) also reads target cells (to add to them) */
-    if (instr->arg2 != 1) {
-      for (int t = 0; t < instr->arg; t++) {
-        if (instr->targets[t].offset == offset)
+    /* Additive TRANSFER (is_assignment == 0) also reads target cells (to add to
+     * them) */
+    if (instr->transfer.is_assignment != 1) {
+      for (int t = 0; t < instr->transfer.target_count; t++) {
+        if (instr->transfer.targets[t].offset == offset)
           return 1;
       }
     }
@@ -1076,7 +1089,7 @@ void eliminate_dead_stores(Program *output, const Program *input) {
     const Instruction *curr = &input->instructions[i];
 
     /* Only check writes: INC (modifies) and single-cell SET (assigns) */
-    if ((curr->op == OP_INC || (curr->op == OP_SET && curr->arg2 == 1))) {
+    if ((curr->op == OP_INC || (curr->op == OP_SET && curr->set.count == 1))) {
       i32 target_offset = curr->offset;
       int is_dead = 0;
 
@@ -1138,14 +1151,14 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
 
-    if (curr->op == OP_SET && curr->arg2 == 1 && i + 1 < input->size) {
+    if (curr->op == OP_SET && curr->set.count == 1 && i + 1 < input->size) {
       const Instruction *next = &input->instructions[i + 1];
 
       if (next->op == OP_TRANSFER) {
         /* Find which TRANSFER target matches the SET offset */
         int match_idx = -1;
-        for (int t = 0; t < next->arg; t++) {
-          if (next->targets[t].offset == curr->offset) {
+        for (int t = 0; t < next->transfer.target_count; t++) {
+          if (next->transfer.targets[t].offset == curr->set.offset) {
             match_idx = t;
             break;
           }
@@ -1153,27 +1166,28 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
 
         if (match_idx >= 0) {
           /* Emit assignment TRANSFER for matching target */
-          output->instructions[out_index].op = OP_TRANSFER;
-          output->instructions[out_index].arg = 1;  /* one target */
-          output->instructions[out_index].arg2 = 1; /* assignment mode */
-          output->instructions[out_index].offset = next->offset;
-          output->instructions[out_index].targets[0] = next->targets[match_idx];
-          output->instructions[out_index].targets[0].bias +=
-              curr->arg; /* merge SET value */
+          Instruction *xfer = &output->instructions[out_index];
+          xfer->op = OP_TRANSFER;
+          xfer->transfer.target_count = 1;  /* one target */
+          xfer->transfer.is_assignment = 1; /* assignment mode */
+          xfer->transfer.src_offset = next->transfer.src_offset;
+          xfer->transfer.targets[0] = next->transfer.targets[match_idx];
+          xfer->transfer.targets[0].bias +=
+              curr->set.value; /* merge SET value */
           out_index++;
 
           /* Emit additive TRANSFER for remaining targets (if any) */
-          int remaining = next->arg - 1;
+          int remaining = next->transfer.target_count - 1;
           if (remaining > 0) {
-            output->instructions[out_index].op = OP_TRANSFER;
-            output->instructions[out_index].arg = remaining;
-            output->instructions[out_index].arg2 = 0; /* additive mode */
-            output->instructions[out_index].offset = next->offset;
+            Instruction *xfer2 = &output->instructions[out_index];
+            xfer2->op = OP_TRANSFER;
+            xfer2->transfer.target_count = remaining;
+            xfer2->transfer.is_assignment = 0; /* additive mode */
+            xfer2->transfer.src_offset = next->transfer.src_offset;
             int t_out = 0;
-            for (int t = 0; t < next->arg; t++) {
+            for (int t = 0; t < next->transfer.target_count; t++) {
               if (t != match_idx) {
-                output->instructions[out_index].targets[t_out++] =
-                    next->targets[t];
+                xfer2->transfer.targets[t_out++] = next->transfer.targets[t];
               }
             }
             out_index++;
@@ -1219,21 +1233,22 @@ static int merge_inc_into_transfer(Instruction *transfer,
                                    const Instruction *inc) {
   /* Case 1: INC on a destination cell */
   int target_idx = -1;
-  for (int t = 0; t < transfer->arg; t++) {
-    if (transfer->targets[t].offset == inc->offset) {
+  for (int t = 0; t < transfer->transfer.target_count; t++) {
+    if (transfer->transfer.targets[t].offset == inc->inc.offset) {
       target_idx = t;
     }
   }
 
   if (target_idx >= 0) {
-    transfer->targets[target_idx].bias += inc->arg;
+    transfer->transfer.targets[target_idx].bias += inc->inc.amount;
     return 1;
   }
 
   /* Case 2: INC on source cell */
-  if (inc->offset == transfer->offset) {
-    for (int t = 0; t < transfer->arg; t++) {
-      transfer->targets[t].bias += inc->arg * transfer->targets[t].factor;
+  if (inc->inc.offset == transfer->transfer.src_offset) {
+    for (int t = 0; t < transfer->transfer.target_count; t++) {
+      transfer->transfer.targets[t].bias +=
+          inc->inc.amount * transfer->transfer.targets[t].factor;
     }
     return 1;
   }
@@ -1276,9 +1291,10 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
         } else {
           /* Check if INC interferes with TRANSFER */
           const Instruction *inc = &output->instructions[j];
-          int interferes = (inc->offset == merged.offset);
-          for (int t = 0; t < merged.arg && !interferes; t++) {
-            if (inc->offset == merged.targets[t].offset)
+          int interferes = (inc->inc.offset == merged.transfer.src_offset);
+          for (int t = 0; t < merged.transfer.target_count && !interferes;
+               t++) {
+            if (inc->inc.offset == merged.transfer.targets[t].offset)
               interferes = 1;
           }
           if (interferes)
@@ -1302,9 +1318,10 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
           i++; /* Consumed this INC */
         } else {
           const Instruction *inc = &input->instructions[i + 1];
-          int interferes = (inc->offset == merged.offset);
-          for (int t = 0; t < merged.arg && !interferes; t++) {
-            if (inc->offset == merged.targets[t].offset)
+          int interferes = (inc->inc.offset == merged.transfer.src_offset);
+          for (int t = 0; t < merged.transfer.target_count && !interferes;
+               t++) {
+            if (inc->inc.offset == merged.transfer.targets[t].offset)
               interferes = 1;
           }
           if (interferes) {
@@ -1366,67 +1383,72 @@ static int analyze_divmod_pattern(const Program *program, addr_t loop_start,
   const Instruction *end_instr = &program->instructions[loop_start + 5];
 
   /* Verify END matches LOOP */
-  if (end_instr->op != OP_END || end_instr->arg != (i32)loop_start) {
+  if (end_instr->op != OP_END ||
+      end_instr->loop.match_addr != (i32)loop_start) {
     return 0;
   }
-  if (end_instr->offset != loop_instr->offset) {
+  if (end_instr->loop.offset != loop_instr->loop.offset) {
     return 0;
   }
 
   /* Must decrement dividend by 1 */
-  if (inc_instr->op != OP_INC || inc_instr->arg != -1 ||
-      inc_instr->offset != loop_instr->offset) {
+  if (inc_instr->op != OP_INC || inc_instr->inc.amount != -1 ||
+      inc_instr->inc.offset != loop_instr->loop.offset) {
     return 0;
   }
 
-  /* First TRANSFER: 2 targets, additive mode (arg2=0) */
-  if (transfer1->op != OP_TRANSFER || transfer1->arg != 2 ||
-      transfer1->arg2 != 0) {
+  /* First TRANSFER: 2 targets, additive mode (is_assignment=0) */
+  if (transfer1->op != OP_TRANSFER || transfer1->transfer.target_count != 2 ||
+      transfer1->transfer.is_assignment != 0) {
     return 0;
   }
 
   /* First target is temp with factor -1 */
-  if (transfer1->targets[0].factor != -1) {
+  if (transfer1->transfer.targets[0].factor != -1) {
     return 0;
   }
 
   /* Second target is quotient with factor 1, no bias */
-  if (transfer1->targets[1].factor != 1 || transfer1->targets[1].bias != 0) {
+  if (transfer1->transfer.targets[1].factor != 1 ||
+      transfer1->transfer.targets[1].bias != 0) {
     return 0;
   }
 
-  /* Second TRANSFER: assignment (arg2=1) from temp to remainder */
-  if (transfer2->op != OP_TRANSFER || transfer2->arg != 1 ||
-      transfer2->arg2 != 1) {
+  /* Second TRANSFER: assignment (is_assignment=1) from temp to remainder */
+  if (transfer2->op != OP_TRANSFER || transfer2->transfer.target_count != 1 ||
+      transfer2->transfer.is_assignment != 1) {
     return 0;
   }
 
   /* Source of second TRANSFER must be temp cell */
-  if (transfer2->offset != transfer1->targets[0].offset) {
+  if (transfer2->transfer.src_offset != transfer1->transfer.targets[0].offset) {
     return 0;
   }
 
   /* Destination must be remainder (same as first TRANSFER's source), factor 1
    */
-  if (transfer2->targets[0].offset != transfer1->offset ||
-      transfer2->targets[0].factor != 1) {
+  if (transfer2->transfer.targets[0].offset != transfer1->transfer.src_offset ||
+      transfer2->transfer.targets[0].factor != 1) {
     return 0;
   }
 
   /* SET clears temp cell */
-  if (set_instr->op != OP_SET || set_instr->arg != 0 || set_instr->arg2 != 1) {
+  if (set_instr->op != OP_SET || set_instr->set.value != 0 ||
+      set_instr->set.count != 1) {
     return 0;
   }
-  if (set_instr->offset != transfer1->targets[0].offset) {
+  if (set_instr->set.offset != transfer1->transfer.targets[0].offset) {
     return 0;
   }
 
   /* Extract values */
-  *dividend_off = loop_instr->offset;
-  *divisor = transfer1->targets[0].bias + 1; /* divisor encoded as bias+1 */
-  *quotient_off = transfer1->targets[1].offset;
-  *remainder_off = transfer1->offset; /* source of first TRANSFER */
-  *temp_off = transfer1->targets[0].offset;
+  *dividend_off = loop_instr->loop.offset;
+  *divisor =
+      transfer1->transfer.targets[0].bias + 1; /* divisor encoded as bias+1 */
+  *quotient_off = transfer1->transfer.targets[1].offset;
+  *remainder_off =
+      transfer1->transfer.src_offset; /* source of first TRANSFER */
+  *temp_off = transfer1->transfer.targets[0].offset;
 
   /* Divisor must be at least 2 */
   if (*divisor < 2) {
@@ -1460,24 +1482,27 @@ void optimize_divmod(Program *output, const Program *input) {
       if (analyze_divmod_pattern(input, in_index, &dividend_off, &divisor,
                                  &quotient_off, &remainder_off, &temp_off)) {
         /* Emit DIV: quotient += dividend / divisor */
-        output->instructions[out_index].op = OP_DIV;
-        output->instructions[out_index].offset = dividend_off;
-        output->instructions[out_index].arg = divisor;
-        output->instructions[out_index].targets[0].offset = quotient_off;
+        Instruction *div_out = &output->instructions[out_index];
+        div_out->op = OP_DIV;
+        div_out->div.src_offset = dividend_off;
+        div_out->div.divisor = divisor;
+        div_out->div.targets[0].offset = quotient_off;
         out_index++;
 
         /* Emit MOD: remainder = dividend % divisor */
-        output->instructions[out_index].op = OP_MOD;
-        output->instructions[out_index].offset = dividend_off;
-        output->instructions[out_index].arg = divisor;
-        output->instructions[out_index].targets[0].offset = remainder_off;
+        Instruction *mod_out = &output->instructions[out_index];
+        mod_out->op = OP_MOD;
+        mod_out->mod.src_offset = dividend_off;
+        mod_out->mod.divisor = divisor;
+        mod_out->mod.targets[0].offset = remainder_off;
         out_index++;
 
         /* Clear dividend (loop would have decremented it to 0) */
-        output->instructions[out_index].op = OP_SET;
-        output->instructions[out_index].arg = 0;
-        output->instructions[out_index].arg2 = 1;
-        output->instructions[out_index].offset = dividend_off;
+        Instruction *set_out = &output->instructions[out_index];
+        set_out->op = OP_SET;
+        set_out->set.value = 0;
+        set_out->set.count = 1;
+        set_out->set.offset = dividend_off;
         out_index++;
 
         in_index += 5; /* Skip the 6 instructions of the pattern */
@@ -1524,9 +1549,10 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
     /* Identify instructions that write to a potential temp cell */
     if (curr->op == OP_MOD || curr->op == OP_DIV) {
-      temp_off = curr->targets[0].offset;
+      temp_off = curr->div.targets[0].offset;
       is_candidate = 1;
-    } else if (curr->op == OP_IN || (curr->op == OP_SET && curr->arg2 == 1)) {
+    } else if (curr->op == OP_IN ||
+               (curr->op == OP_SET && curr->set.count == 1)) {
       temp_off = curr->offset;
       is_candidate = 1;
     }
@@ -1536,10 +1562,12 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
 
       /* Check for identity TRANSFER: temp -> final, factor=1, bias=0,
        * assignment */
-      if (next->op == OP_TRANSFER && next->arg == 1 && next->arg2 == 1 &&
-          next->offset == temp_off && next->targets[0].factor == 1 &&
-          next->targets[0].bias == 0) {
-        i32 final_off = next->targets[0].offset;
+      if (next->op == OP_TRANSFER && next->transfer.target_count == 1 &&
+          next->transfer.is_assignment == 1 &&
+          next->transfer.src_offset == temp_off &&
+          next->transfer.targets[0].factor == 1 &&
+          next->transfer.targets[0].bias == 0) {
+        i32 final_off = next->transfer.targets[0].offset;
 
         /* Look for terminating SET 0 @temp */
         addr_t set_idx = 0;
@@ -1549,8 +1577,8 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           const Instruction *future = &input->instructions[j];
 
           /* Found SET 0 @temp - can optimize */
-          if (future->op == OP_SET && future->arg == 0 && future->arg2 == 1 &&
-              future->offset == temp_off) {
+          if (future->op == OP_SET && future->set.value == 0 &&
+              future->set.count == 1 && future->set.offset == temp_off) {
             set_idx = j;
             can_optimize = 1;
             break;
@@ -1564,7 +1592,8 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
             break;
           }
 
-          if (future->op == OP_TRANSFER && future->offset == temp_off) {
+          if (future->op == OP_TRANSFER &&
+              future->transfer.src_offset == temp_off) {
             break;
           }
 
@@ -1579,7 +1608,7 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
           /* Emit original instruction targeting final cell directly */
           output->instructions[out_index] = *curr;
           if (curr->op == OP_MOD || curr->op == OP_DIV) {
-            output->instructions[out_index].targets[0].offset = final_off;
+            output->instructions[out_index].div.targets[0].offset = final_off;
           } else {
             output->instructions[out_index].offset = final_off;
           }
@@ -1637,15 +1666,16 @@ void optimize_transfer_chain(Program *output, const Program *input) {
   for (addr_t i = 0; i < input->size; i++) {
     const Instruction *curr = &input->instructions[i];
 
-    /* Look for additive TRANSFER (arg2=0) */
-    if (curr->op == OP_TRANSFER && curr->arg2 == 0) {
-      i32 source_off = curr->offset;
+    /* Look for additive TRANSFER (is_assignment=0) */
+    if (curr->op == OP_TRANSFER && curr->transfer.is_assignment == 0) {
+      i32 source_off = curr->transfer.src_offset;
 
       /* Try each target as a potential temp cell */
-      for (int temp_idx = 0; temp_idx < curr->arg; temp_idx++) {
-        i32 temp_off = curr->targets[temp_idx].offset;
-        i32 F1 = curr->targets[temp_idx].factor;
-        i32 B1 = curr->targets[temp_idx].bias;
+      for (int temp_idx = 0; temp_idx < curr->transfer.target_count;
+           temp_idx++) {
+        i32 temp_off = curr->transfer.targets[temp_idx].offset;
+        i32 F1 = curr->transfer.targets[temp_idx].factor;
+        i32 B1 = curr->transfer.targets[temp_idx].bias;
 
         /* Collect final targets: non-temp from curr + composed from later */
         TransferTarget collected[MAX_TRANSFER_TARGETS];
@@ -1653,9 +1683,9 @@ void optimize_transfer_chain(Program *output, const Program *input) {
         int source_restored = 0;
 
         /* Add non-temp targets from curr */
-        for (int t = 0; t < curr->arg; t++) {
+        for (int t = 0; t < curr->transfer.target_count; t++) {
           if (t != temp_idx && num_collected < MAX_TRANSFER_TARGETS) {
-            collected[num_collected++] = curr->targets[t];
+            collected[num_collected++] = curr->transfer.targets[t];
           }
         }
 
@@ -1667,29 +1697,33 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           const Instruction *future = &input->instructions[j];
 
           /* Found terminating SET 0 @temp */
-          if (future->op == OP_SET && future->arg == 0 && future->arg2 == 1 &&
-              future->offset == temp_off) {
+          if (future->op == OP_SET && future->set.value == 0 &&
+              future->set.count == 1 && future->set.offset == temp_off) {
             set_idx = j;
             break;
           }
 
           /* Additive TRANSFER FROM temp - compose factors */
-          if (future->op == OP_TRANSFER && future->offset == temp_off &&
-              future->arg2 == 0) {
-            for (int t = 0; t < future->arg; t++) {
+          if (future->op == OP_TRANSFER &&
+              future->transfer.src_offset == temp_off &&
+              future->transfer.is_assignment == 0) {
+            for (int t = 0; t < future->transfer.target_count; t++) {
               if (num_collected >= MAX_TRANSFER_TARGETS) {
                 valid = 0;
                 break;
               }
               /* Compose: final += temp*Ft + Bt = source*(F1*Ft) + (B1*Ft + Bt)
                */
-              collected[num_collected].offset = future->targets[t].offset;
-              collected[num_collected].factor = F1 * future->targets[t].factor;
+              collected[num_collected].offset =
+                  future->transfer.targets[t].offset;
+              collected[num_collected].factor =
+                  F1 * future->transfer.targets[t].factor;
               collected[num_collected].bias =
-                  B1 * future->targets[t].factor + future->targets[t].bias;
+                  B1 * future->transfer.targets[t].factor +
+                  future->transfer.targets[t].bias;
 
               /* Check if this restores source (factor=1, bias=0 to source) */
-              if (future->targets[t].offset == source_off &&
+              if (future->transfer.targets[t].offset == source_off &&
                   collected[num_collected].factor == 1 &&
                   collected[num_collected].bias == 0) {
                 source_restored = 1;
@@ -1700,15 +1734,17 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
 
           /* Assignment TRANSFER FROM temp */
-          if (future->op == OP_TRANSFER && future->offset == temp_off &&
-              future->arg2 == 1 && future->arg == 1) {
+          if (future->op == OP_TRANSFER &&
+              future->transfer.src_offset == temp_off &&
+              future->transfer.is_assignment == 1 &&
+              future->transfer.target_count == 1) {
 #ifdef UNSAFE_TRANSFER_CHAIN
             /* UNSAFE: Assumes temp starts at zero without verification.
              * If it restores source exactly, that's OK */
-            i32 F2 = future->targets[0].factor;
-            i32 B2 = future->targets[0].bias;
-            if (future->targets[0].offset == source_off && F1 * F2 == 1 &&
-                B1 * F2 + B2 == 0) {
+            i32 F2 = future->transfer.targets[0].factor;
+            i32 B2 = future->transfer.targets[0].bias;
+            if (future->transfer.targets[0].offset == source_off &&
+                F1 * F2 == 1 && B1 * F2 + B2 == 0) {
               source_restored = 1;
               continue;
             }
@@ -1719,8 +1755,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
 
           /* TRANSFER TO temp invalidates our analysis */
           if (future->op == OP_TRANSFER) {
-            for (int t = 0; t < future->arg; t++) {
-              if (future->targets[t].offset == temp_off) {
+            for (int t = 0; t < future->transfer.target_count; t++) {
+              if (future->transfer.targets[t].offset == temp_off) {
                 valid = 0;
                 break;
               }
@@ -1761,12 +1797,13 @@ void optimize_transfer_chain(Program *output, const Program *input) {
 
         if (valid && set_idx > 0 && num_collected > 0) {
           /* Emit optimized transfer */
-          output->instructions[out_index].op = OP_TRANSFER;
-          output->instructions[out_index].arg = num_collected;
-          output->instructions[out_index].arg2 = 0;
-          output->instructions[out_index].offset = source_off;
+          Instruction *xfer = &output->instructions[out_index];
+          xfer->op = OP_TRANSFER;
+          xfer->transfer.target_count = num_collected;
+          xfer->transfer.is_assignment = 0;
+          xfer->transfer.src_offset = source_off;
           for (int t = 0; t < num_collected; t++) {
-            output->instructions[out_index].targets[t] = collected[t];
+            xfer->transfer.targets[t] = collected[t];
           }
           out_index++;
 
@@ -1797,34 +1834,37 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
                                            const i32 offset) {
   switch (instr->op) {
   case OP_INC:
-    return instr->offset == offset;
+    return instr->inc.offset == offset;
   case OP_SET:
-    if (instr->arg2 == 1) {
-      return instr->offset == offset;
+    if (instr->set.count == 1) {
+      return instr->set.offset == offset;
     }
     /* Multi-cell SET - check if offset is in range */
-    if (instr->stride <= 1) {
-      return offset >= instr->offset && offset < instr->offset + instr->arg2;
+    if (instr->set.stride <= 1) {
+      return offset >= instr->set.offset &&
+             offset < instr->set.offset + instr->set.count;
     }
-    if (offset < instr->offset) {
+    if (offset < instr->set.offset) {
       return 0;
     }
-    i32 diff = offset - instr->offset;
-    if (diff % instr->stride != 0) {
+    i32 diff = offset - instr->set.offset;
+    if (diff % instr->set.stride != 0) {
       return 0;
     }
-    return diff / instr->stride < instr->arg2;
+    return diff / instr->set.stride < instr->set.count;
   case OP_OUT:
+    return instr->out.offset == offset;
   case OP_IN:
-    return instr->offset == offset;
+    return instr->in.offset == offset;
   case OP_DIV:
   case OP_MOD:
-    return instr->offset == offset || instr->targets[0].offset == offset;
+    return instr->div.src_offset == offset ||
+           instr->div.targets[0].offset == offset;
   case OP_TRANSFER:
-    if (instr->offset == offset)
+    if (instr->transfer.src_offset == offset)
       return 1;
-    for (int t = 0; t < instr->arg; t++) {
-      if (instr->targets[t].offset == offset)
+    for (int t = 0; t < instr->transfer.target_count; t++) {
+      if (instr->transfer.targets[t].offset == offset)
         return 1;
     }
     return 0;
@@ -1870,15 +1910,15 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
       continue;
     }
 
-    i32 offset = instr->offset;
+    i32 offset = instr->inc.offset;
 
     for (addr_t j = i + 1; j < input->size; j++) {
       const Instruction *next = &input->instructions[j];
 
       /* Found another INC on same cell - merge */
-      if (next->op == OP_INC && next->offset == offset) {
+      if (next->op == OP_INC && next->inc.offset == offset) {
         skip[i] = 1;
-        adjust[j] += instr->arg;
+        adjust[j] += instr->inc.amount;
         break;
       }
 
@@ -1897,8 +1937,8 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
 
     Instruction out_instr = input->instructions[i];
     if (out_instr.op == OP_INC) {
-      out_instr.arg += adjust[i];
-      if (out_instr.arg == 0) {
+      out_instr.inc.amount += adjust[i];
+      if (out_instr.inc.amount == 0) {
         continue; /* INC 0 is a no-op */
       }
     }

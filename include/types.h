@@ -16,7 +16,7 @@ typedef enum {
   OP_LOOP = '[',
   OP_END = ']',
   OP_DONE = '\0',
-  
+
   // IR opcodes
   OP_MOVE = OP_RIGHT,
   OP_ADD = OP_INC,
@@ -100,7 +100,7 @@ typedef struct {
       i32 _loop_pad;
       i32 offset;
     } loop;
-    
+
     struct {
       i32 divisor;
       i32 _div_pad;
