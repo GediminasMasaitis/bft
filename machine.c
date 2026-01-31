@@ -177,7 +177,8 @@ status_t machine_run(Machine *machine) {
       break;
 
     case OP_TRANSFER: {
-      const cell_t *src = &machine->cells[machine->dp + instr->transfer.src_offset];
+      const cell_t *src =
+          &machine->cells[machine->dp + instr->transfer.src_offset];
       const cell_t v = *src;
       const i32 is_assignment = instr->transfer.is_assignment;
       for (i32 t = 0; t < instr->transfer.target_count; t++) {
@@ -195,7 +196,8 @@ status_t machine_run(Machine *machine) {
     }
 
     case OP_DIV: {
-      const cell_t *dividend = &machine->cells[machine->dp + instr->div.src_offset];
+      const cell_t *dividend =
+          &machine->cells[machine->dp + instr->div.src_offset];
       const cell_t divisor = (cell_t)instr->div.divisor;
       cell_t *quotient = &machine->cells[machine->dp + instr->div.dst_offset];
       *quotient += *dividend / divisor;
@@ -203,7 +205,8 @@ status_t machine_run(Machine *machine) {
     }
 
     case OP_MOD: {
-      const cell_t *dividend = &machine->cells[machine->dp + instr->mod.src_offset];
+      const cell_t *dividend =
+          &machine->cells[machine->dp + instr->mod.src_offset];
       const cell_t divisor = (cell_t)instr->mod.divisor;
       cell_t *remainder = &machine->cells[machine->dp + instr->mod.dst_offset];
       *remainder = *dividend % divisor;

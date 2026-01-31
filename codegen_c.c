@@ -34,7 +34,8 @@ static int get_shift(int n) {
   return shift;
 }
 
-static void print_multiply_expr(FILE *output, const char *operand, const int factor) {
+static void print_multiply_expr(FILE *output, const char *operand,
+                                const int factor) {
   const int factor_abs = abs(factor);
   const int shift = get_shift(factor_abs);
 

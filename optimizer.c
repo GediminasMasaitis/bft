@@ -505,7 +505,8 @@ static addr_t get_loop_length(const Program *output, const addr_t input) {
  *
  * Returns: number of transfer targets (0 if not a valid transfer loop)
  ******************************************************************************/
-static int analyze_multi_transfer(const Program *program, const addr_t loop_start,
+static int analyze_multi_transfer(const Program *program,
+                                  const addr_t loop_start,
                                   TransferTarget *targets) {
   /* Start after the LOOP instruction (caller already verified it's OP_LOOP) */
   addr_t i = loop_start + 1;
@@ -753,7 +754,8 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 
         /* OUT on different cell: buffer for potential move */
         if (next->op == OP_OUT && next->out.offset != target_offset) {
-          if (moved_count < 256) moved_buffer[moved_count++] = *next;
+          if (moved_count < 256)
+            moved_buffer[moved_count++] = *next;
           j++;
           continue;
         }
@@ -766,7 +768,8 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
             touches_target =
                 (next->transfer.targets[t].offset == target_offset);
           if (!touches_target) {
-            if (moved_count < 256) moved_buffer[moved_count++] = *next;
+            if (moved_count < 256)
+              moved_buffer[moved_count++] = *next;
             j++;
             continue;
           }
@@ -777,14 +780,16 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
         if ((next->op == OP_DIV || next->op == OP_MOD) &&
             next->div.src_offset != target_offset &&
             next->div.dst_offset != target_offset) {
-          if (moved_count < 256) moved_buffer[moved_count++] = *next;
+          if (moved_count < 256)
+            moved_buffer[moved_count++] = *next;
           j++;
           continue;
         }
 
         /* INC on different cell: buffer for potential move */
         if (next->op == OP_INC && get_offset(next) != target_offset) {
-          if (moved_count < 256) moved_buffer[moved_count++] = *next;
+          if (moved_count < 256)
+            moved_buffer[moved_count++] = *next;
           j++;
           continue;
         }
@@ -1455,10 +1460,10 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
  * Returns 1 if pattern matches, 0 otherwise.
  * Sets output parameters to the relevant cell offsets and divisor value.
  ******************************************************************************/
-static int analyze_divmod_pattern(const Program *program, const addr_t loop_start,
-                                  i32 *dividend_off, i32 *divisor,
-                                  i32 *quotient_off, i32 *remainder_off,
-                                  i32 *temp_off) {
+static int analyze_divmod_pattern(const Program *program,
+                                  const addr_t loop_start, i32 *dividend_off,
+                                  i32 *divisor, i32 *quotient_off,
+                                  i32 *remainder_off, i32 *temp_off) {
   /* Need exactly 6 instructions (caller already verified loop_start is OP_LOOP)
    */
   if (loop_start + 5 >= program->size) {
@@ -1736,7 +1741,8 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
  *
  * Returns: 1 if cell is provably zero, 0 otherwise
  ******************************************************************************/
-static int is_cell_known_zero(const Program *input, const addr_t i, const i32 offset) {
+static int is_cell_known_zero(const Program *input, const addr_t i,
+                              const i32 offset) {
   i32 adjusted_offset = offset;
 
   for (addr_t k = i; k > 0; k--) {
@@ -1922,7 +1928,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
             i32 B2 = future->transfer.targets[0].bias;
 
 #ifdef UNSAFE_TRANSFER_CHAIN
-            /* UNSAFE: Only handle source restoration case without verification */
+            /* UNSAFE: Only handle source restoration case without verification
+             */
             if (future->transfer.targets[0].offset == source_off &&
                 F1 * F2 == 1 && B1 * F2 + B2 == 0) {
               source_restored = 1;
