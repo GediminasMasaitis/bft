@@ -2128,7 +2128,7 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
       /* Found another INC on same cell - merge */
       if (next->op == OP_INC && next->inc.offset == offset) {
         skip[i] = 1;
-        adjust[j] += instr->inc.count;
+        adjust[j] += instr->inc.count + adjust[i];
         break;
       }
 
@@ -2161,6 +2161,19 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
   program_calculate_loops(output);
 }
 
+static void run_pass(Program *program, void(*optimization)(Program *out, const Program* in)) {
+    Program out;
+    optimization(&out, program);
+    *program = out;
+}
+
+static void merge_right_wrapper(Program *out, const Program *in) {
+  merge_consecutive_right_inc(out, in, OP_RIGHT);
+}
+static void merge_inc_wrapper(Program *out, const Program *in) {
+  merge_consecutive_right_inc(out, in, OP_INC);
+}
+
 /*******************************************************************************
  * MAIN OPTIMIZATION DRIVER (optimize_program)
  *
@@ -2184,86 +2197,34 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
  * - Dead store elimination may expose new merging opportunities
  * - Chain optimization may enable more dead store elimination
  ******************************************************************************/
-/* Wrapper functions for RUN_PASS macro */
-static void merge_right_wrapper(Program *out, const Program *in) {
-  merge_consecutive_right_inc(out, in, OP_RIGHT);
-}
-static void merge_inc_wrapper(Program *out, const Program *in) {
-  merge_consecutive_right_inc(out, in, OP_INC);
-}
-
 void optimize_program(Program *program) {
-  Program *optimized = malloc(sizeof(Program));
   Program *before_pass = malloc(sizeof(Program));
 
   for (int iteration = 0; iteration < 10; iteration++) {
     memcpy(before_pass, program, sizeof(Program));
 
-    /* Instruction folding - merge consecutive RIGHT and INC */
-    merge_right_wrapper(optimized, program);
-    *program = *optimized;
-    merge_inc_wrapper(optimized, program);
-    *program = *optimized;
+    run_pass(program, merge_right_wrapper);  // >>> → >3
+    run_pass(program, merge_inc_wrapper); // +++ → +3
+    run_pass(program, create_zeroing_sets); // [-] → SET 0
+    run_pass(program, optimize_memset); // SET > SET > SET → SET(count)
+    run_pass(program, optimize_seek_empty); // [>] → SEEK_EMPTY
+    run_pass(program, optimize_multi_transfer); // [->+<] → TRANSFER + SET 0
+    run_pass(program, optimize_set_inc_merge); // SET a, INC b → SET (a+b)
+    run_pass(program, optimize_offsets); // eliminate RIGHT by using offsets
+    run_pass(program, optimize_divmod); // Divmod pattern detection
+    run_pass(program, eliminate_dead_stores); // Dead store elimination - MUST run before SET+TRANSFER merge
+    run_pass(program, optimize_set_transfer_merge); // SET + TRANSFER merge (requires dead stores eliminated first)
+    run_pass(program, optimize_inc_transfer_merge); // INC + TRANSFER merge
+    run_pass(program, optimize_transfer_chain); // Transfer chain optimization
+    run_pass(program, optimize_eliminate_temp_cells); // Temp cell elimination
+    run_pass(program, optimize_inc_cancellation); // INC cancellation
 
-    /* Zeroing loop detection: [-] → SET 0 */
-    create_zeroing_sets(optimized, program);
-    *program = *optimized;
-
-    /* Memset optimization: SET > SET > SET → SET(count) */
-    optimize_memset(optimized, program);
-    *program = *optimized;
-
-    /* Seek empty optimization: [>] → SEEK_EMPTY */
-    optimize_seek_empty(optimized, program);
-    *program = *optimized;
-
-    /* Transfer loop optimization: [->+<] → TRANSFER + SET 0 */
-    optimize_multi_transfer(optimized, program);
-    *program = *optimized;
-
-    /* SET + INC merge: SET v, INC n → SET (v+n) */
-    optimize_set_inc_merge(optimized, program);
-    *program = *optimized;
-
-    /* Offset threading: eliminate RIGHT by using offsets */
-    optimize_offsets(optimized, program);
-    *program = *optimized;
-
-    /* Divmod pattern detection */
-    optimize_divmod(optimized, program);
-    *program = *optimized;
-
-    /* Dead store elimination - MUST run before SET+TRANSFER merge */
-    eliminate_dead_stores(optimized, program);
-    *program = *optimized;
-
-    /* SET + TRANSFER merge (requires dead stores eliminated first) */
-    optimize_set_transfer_merge(optimized, program);
-    *program = *optimized;
-
-    /* INC + TRANSFER merge */
-    optimize_inc_transfer_merge(optimized, program);
-    *program = *optimized;
-
-    /* Transfer chain optimization */
-    optimize_transfer_chain(optimized, program);
-    *program = *optimized;
-
-    /* Temp cell elimination */
-    optimize_eliminate_temp_cells(optimized, program);
-    *program = *optimized;
-
-    /* INC cancellation */
-    optimize_inc_cancellation(optimized, program);
-    *program = *optimized;
-
-    /* Check for fixed point */
+    // Check for fixed point
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
     if (!changed) {
       break;
     }
   }
 
-  free(optimized);
   free(before_pass);
 }
