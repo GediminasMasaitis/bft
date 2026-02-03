@@ -1755,6 +1755,36 @@ static int is_cell_known_zero(const Program *input, const addr_t i,
 }
 
 /*******************************************************************************
+ * HELPER: MERGE OR ADD TRANSFER TARGET
+ *
+ * Either merges with an existing target at the same offset (adding factors
+ * and biases for additive mode) or adds a new target. Returns 1 on success,
+ * 0 if array is full and target couldn't be added.
+ ******************************************************************************/
+static int merge_or_add_target(TransferTarget *collected, int *num_collected,
+                               i32 offset, i32 factor, i32 bias) {
+  /* Check if offset already exists in collected - if so, merge */
+  for (int i = 0; i < *num_collected; i++) {
+    if (collected[i].offset == offset) {
+      collected[i].factor += factor;
+      collected[i].bias += bias;
+      return 1;
+    }
+  }
+
+  /* Not found - add new target if space available */
+  if (*num_collected >= MAX_TRANSFER_TARGETS) {
+    return 0;
+  }
+
+  collected[*num_collected].offset = offset;
+  collected[*num_collected].factor = factor;
+  collected[*num_collected].bias = bias;
+  (*num_collected)++;
+  return 1;
+}
+
+/*******************************************************************************
  * PASS: TRANSFER CHAIN OPTIMIZATION (optimize_transfer_chain)
  *
  * Optimizes chains of transfers through temporary cells by composing the
@@ -1823,31 +1853,32 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
 
           /* Additive TRANSFER FROM temp - compose factors */
+          /* Only valid if temp cell starts at zero (so temp = source*F1 + B1) */
           if (future->op == OP_TRANSFER &&
               future->transfer.src_offset == temp_off &&
-              future->transfer.is_assignment == 0) {
+              future->transfer.is_assignment == 0 &&
+              is_cell_known_zero(input, i, temp_off)) {
             for (int t = 0; t < future->transfer.target_count; t++) {
-              if (num_collected >= MAX_TRANSFER_TARGETS) {
-                valid = 0;
-                break;
-              }
               /* Compose: final += temp*Ft + Bt = source*(F1*Ft) + (B1*Ft + Bt)
                */
-              collected[num_collected].offset =
-                  future->transfer.targets[t].offset;
-              collected[num_collected].factor =
-                  F1 * future->transfer.targets[t].factor;
-              collected[num_collected].bias =
+              i32 composed_offset = future->transfer.targets[t].offset;
+              i32 composed_factor = F1 * future->transfer.targets[t].factor;
+              i32 composed_bias =
                   B1 * future->transfer.targets[t].factor +
                   future->transfer.targets[t].bias;
 
               /* Check if this restores source (factor=1, bias=0 to source) */
-              if (future->transfer.targets[t].offset == source_off &&
-                  collected[num_collected].factor == 1 &&
-                  collected[num_collected].bias == 0) {
+              if (composed_offset == source_off && composed_factor == 1 &&
+                  composed_bias == 0) {
                 source_restored = 1;
               }
-              num_collected++;
+
+              if (!merge_or_add_target(collected, &num_collected,
+                                       composed_offset, composed_factor,
+                                       composed_bias)) {
+                valid = 0;
+                break;
+              }
             }
             continue;
           }
@@ -1880,24 +1911,23 @@ void optimize_transfer_chain(Program *output, const Program *input) {
 #else
             /* Safe mode: verify temp is zero, then compose */
             if (is_cell_known_zero(input, i, temp_off)) {
-              if (num_collected >= MAX_TRANSFER_TARGETS) {
+              /* Compose the factors and biases */
+              i32 composed_offset = future->transfer.targets[0].offset;
+              i32 composed_factor = F1 * F2;
+              i32 composed_bias = B1 * F2 + B2;
+
+              /* Check if this restores source (factor=1, bias=0 to source) */
+              if (composed_offset == source_off && composed_factor == 1 &&
+                  composed_bias == 0) {
+                source_restored = 1;
+              }
+
+              if (!merge_or_add_target(collected, &num_collected,
+                                       composed_offset, composed_factor,
+                                       composed_bias)) {
                 valid = 0;
                 break;
               }
-
-              /* Compose the factors and biases */
-              collected[num_collected].offset =
-                  future->transfer.targets[0].offset;
-              collected[num_collected].factor = F1 * F2;
-              collected[num_collected].bias = B1 * F2 + B2;
-
-              /* Check if this restores source (factor=1, bias=0 to source) */
-              if (future->transfer.targets[0].offset == source_off &&
-                  collected[num_collected].factor == 1 &&
-                  collected[num_collected].bias == 0) {
-                source_restored = 1;
-              }
-              num_collected++;
               continue;
             }
 #endif
@@ -1942,6 +1972,17 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           for (int t = 0; t < num_collected; t++) {
             if (collected[t].offset != source_off || collected[t].factor != 1 ||
                 collected[t].bias != 0) {
+              collected[new_count++] = collected[t];
+            }
+          }
+          num_collected = new_count;
+        }
+
+        /* Filter out no-op targets (factor=0 and bias=0) */
+        if (valid && set_idx > 0) {
+          int new_count = 0;
+          for (int t = 0; t < num_collected; t++) {
+            if (collected[t].factor != 0 || collected[t].bias != 0) {
               collected[new_count++] = collected[t];
             }
           }
