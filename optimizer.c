@@ -432,32 +432,6 @@ void optimize_seek_empty(Program *output, const Program *input) {
 }
 
 /*******************************************************************************
- * HELPER: GET LOOP LENGTH
- *
- * Returns the number of instructions in a loop, including the opening LOOP
- * and closing END. Handles nested loops correctly using depth tracking.
- *
- * Used by optimize_multi_transfer to skip over processed loops.
- ******************************************************************************/
-static addr_t get_loop_length(const Program *output, const addr_t input) {
-  int depth = 0;
-  addr_t i = input;
-
-  while (i < output->size) {
-    if (output->instructions[i].op == OP_LOOP) {
-      depth++;
-    } else if (output->instructions[i].op == OP_END) {
-      depth--;
-      if (depth == 0) {
-        return i - input + 1;
-      }
-    }
-    i++;
-  }
-  return 0; /* Unmatched loop - should not happen in valid program */
-}
-
-/*******************************************************************************
  * PASS: TRANSFER LOOP ANALYSIS (analyze_multi_transfer)
  *
  * Analyzes a loop to determine if it's a "transfer loop" - a loop that
@@ -657,8 +631,7 @@ void optimize_multi_transfer(Program *output, const Program *input) {
         out_index++;
 
         /* Skip past the entire loop */
-        const addr_t loop_len = get_loop_length(input, in_index);
-        in_index += loop_len - 1;
+        in_index = input->instructions[in_index].loop.match_addr;
 
         continue;
       }
