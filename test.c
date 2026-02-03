@@ -31,7 +31,7 @@
 #define MAX_PROGRAMS 64
 #define MAX_OUTPUT_SIZE (1024 * 1024) /* 1MB max output */
 #define MAX_PATH_LEN 512
-#define TIMEOUT_SECONDS 30
+#define TIMEOUT_SECONDS 10
 
 typedef enum {
   BACKEND_INTERPRETER,
