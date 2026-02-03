@@ -31,51 +31,35 @@ status_t program_calculate_loops(Program *program) {
   return STATUS_OK;
 }
 
-status_t simple_machine_to_program(Program *program,
-                                   const SimpleMachine *machine) {
+status_t program_parse(Program *program, const op_t *code) {
   memset(program, 0, sizeof(*program));
 
-  for (addr_t i = 0; i < machine->code_size; i++) {
-    const op_t op = machine->code[i];
+  for (addr_t i = 0; code[i] != OP_DONE && i < MAX_CODE_SIZE; i++) {
+    const op_t op = code[i];
+    Instruction *out = &program->instructions[program->size];
 
     switch (op) {
     case OP_RIGHT:
-      if (program->size >= MAX_CODE_SIZE) {
-        fprintf(stderr, "Error: Program too large after filtering\n");
-        return STATUS_CODE_TOO_LARGE;
-      }
-      program->instructions[program->size].op = OP_RIGHT;
-      program->instructions[program->size].right.distance = 1;
+      out->op = OP_RIGHT;
+      out->right.distance = 1;
       program->size++;
       break;
 
     case OP_LEFT:
-      if (program->size >= MAX_CODE_SIZE) {
-        fprintf(stderr, "Error: Program too large after filtering\n");
-        return STATUS_CODE_TOO_LARGE;
-      }
-      program->instructions[program->size].op = OP_RIGHT;
-      program->instructions[program->size].right.distance = -1;
+      out->op = OP_RIGHT;
+      out->right.distance = -1;
       program->size++;
       break;
 
     case OP_INC:
-      if (program->size >= MAX_CODE_SIZE) {
-        fprintf(stderr, "Error: Program too large after filtering\n");
-        return STATUS_CODE_TOO_LARGE;
-      }
-      program->instructions[program->size].op = OP_INC;
-      program->instructions[program->size].inc.count = 1;
+      out->op = OP_INC;
+      out->inc.count = 1;
       program->size++;
       break;
 
     case OP_DEC:
-      if (program->size >= MAX_CODE_SIZE) {
-        fprintf(stderr, "Error: Program too large after filtering\n");
-        return STATUS_CODE_TOO_LARGE;
-      }
-      program->instructions[program->size].op = OP_INC;
-      program->instructions[program->size].inc.count = -1;
+      out->op = OP_INC;
+      out->inc.count = -1;
       program->size++;
       break;
 
@@ -83,18 +67,17 @@ status_t simple_machine_to_program(Program *program,
     case OP_IN:
     case OP_LOOP:
     case OP_END:
-      if (program->size >= MAX_CODE_SIZE) {
-        fprintf(stderr, "Error: Program too large after filtering\n");
-        return STATUS_CODE_TOO_LARGE;
-      }
-      program->instructions[program->size].op = op;
-      /* These instructions don't need initialization - offsets default to 0 */
+      out->op = op;
       program->size++;
       break;
 
     default:
-      // skip comments
-      break;
+      break; /* skip comments */
+    }
+
+    if (program->size >= MAX_CODE_SIZE) {
+      fprintf(stderr, "Error: Program too large\n");
+      return STATUS_CODE_TOO_LARGE;
     }
   }
 

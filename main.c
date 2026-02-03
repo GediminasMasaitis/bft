@@ -155,10 +155,9 @@ int main(int argc, char **argv) {
   const char *input_path = argv[optind];
 
   op_t *code = calloc(MAX_CODE_SIZE, sizeof(op_t));
-  SimpleMachine *simple_machine = malloc(sizeof(SimpleMachine));
   Machine *machine = calloc(1, sizeof(Machine));
 
-  if (!code || !simple_machine || !machine) {
+  if (!code || !machine) {
     fprintf(stderr, "Error: Out of memory\n");
     status = 1;
     goto cleanup;
@@ -179,12 +178,7 @@ int main(int argc, char **argv) {
   }
   fclose(file);
 
-  status = simple_machine_load(simple_machine, code);
-  if (status != STATUS_OK) {
-    goto cleanup;
-  }
-
-  status = simple_machine_to_program(&machine->program, simple_machine);
+  status = program_parse(&machine->program, code);
   if (status != STATUS_OK) {
     goto cleanup;
   }
@@ -223,7 +217,6 @@ int main(int argc, char **argv) {
 
 cleanup:
   free(code);
-  free(simple_machine);
   free(machine);
   return status;
 }
