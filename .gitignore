@@ -1,6 +1,7 @@
 *.o
 *.s
 bft
+test
 
 program.*
 
