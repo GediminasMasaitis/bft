@@ -220,8 +220,6 @@ static i32 get_count(const Instruction *instr) {
  ******************************************************************************/
 void merge_consecutive_right_inc(Program *output, const Program *input,
                                  const op_t op) {
-  memset(output, 0, sizeof(*output));
-
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
@@ -262,7 +260,6 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -287,8 +284,6 @@ void merge_consecutive_right_inc(Program *output, const Program *input,
  * Output: OP_SET with arg=0 (value), arg2=1 (count of 1 cell)
  ******************************************************************************/
 void create_zeroing_sets(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
@@ -314,7 +309,6 @@ void create_zeroing_sets(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -335,8 +329,6 @@ void create_zeroing_sets(Program *output, const Program *input) {
  * by (count-1)*stride total.
  ******************************************************************************/
 void optimize_memset(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
@@ -399,7 +391,6 @@ void optimize_memset(Program *output, const Program *input) {
     out_index++;
   }
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -418,8 +409,6 @@ void optimize_memset(Program *output, const Program *input) {
  * Output: OP_SEEK_EMPTY with arg = stride (positive=right, negative=left)
  ******************************************************************************/
 void optimize_seek_empty(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-
   addr_t out_index = 0;
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
     const Instruction instr = input->instructions[in_index];
@@ -440,7 +429,6 @@ void optimize_seek_empty(Program *output, const Program *input) {
     out_index++;
   }
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -638,8 +626,6 @@ static int analyze_multi_transfer(const Program *program,
  * the initial value of the source cell.
  ******************************************************************************/
 void optimize_multi_transfer(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
-
   addr_t out_index = 0;
 
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
@@ -683,7 +669,6 @@ void optimize_multi_transfer(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -711,7 +696,6 @@ void optimize_multi_transfer(Program *output, const Program *input) {
  *   - RIGHT/SEEK_EMPTY (changes pointer position)
  ******************************************************************************/
 void optimize_set_inc_merge(Program *output, const Program *original) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   /* Buffer for instructions to potentially move before SET */
@@ -831,7 +815,6 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -940,8 +923,6 @@ static int analyze_loop_balance(const Program *program, const addr_t loop_start,
  * A sentinel value (-999999) marks unbalanced loops.
  ******************************************************************************/
 void optimize_offsets(Program *output, const Program *original) {
-  memset(output, 0, sizeof(*output));
-
   addr_t out_index = 0;
   i32 virtual_offset = 0;
 
@@ -1068,7 +1049,6 @@ void optimize_offsets(Program *output, const Program *original) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -1189,7 +1169,6 @@ static int instruction_uses_cell(const Instruction *instr, const i32 offset) {
  * The scan stops at control flow since we can't track through loops reliably.
  ******************************************************************************/
 void eliminate_dead_stores(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t i = 0; i < input->size; i++) {
@@ -1224,7 +1203,6 @@ void eliminate_dead_stores(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -1252,7 +1230,6 @@ void eliminate_dead_stores(Program *output, const Program *input) {
  *   2. Additive TRANSFER for remaining targets (arg2=0)
  ******************************************************************************/
 void optimize_set_transfer_merge(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t i = 0; i < input->size; i++) {
@@ -1310,7 +1287,6 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -1378,7 +1354,6 @@ static int merge_inc_into_transfer(Instruction *transfer,
  * When an interfering INC is found, scanning in that direction stops.
  ******************************************************************************/
 void optimize_inc_transfer_merge(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t i = 0; i < input->size; i++) {
@@ -1437,7 +1412,6 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -1564,7 +1538,6 @@ static int analyze_divmod_pattern(const Program *program,
  *0).
  ******************************************************************************/
 void optimize_divmod(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t in_index = 0; in_index < input->size; in_index++) {
@@ -1610,7 +1583,6 @@ void optimize_divmod(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -1633,7 +1605,6 @@ void optimize_divmod(Program *output, const Program *input) {
  * This eliminates the intermediate TRANSFER.
  ******************************************************************************/
 void optimize_eliminate_temp_cells(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t i = 0; i < input->size; i++) {
@@ -1726,7 +1697,6 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -1837,7 +1807,6 @@ static int is_cell_known_zero(const Program *input, const addr_t i,
  * in which case the restoration is filtered out as a no-op.
  ******************************************************************************/
 void optimize_transfer_chain(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   for (addr_t i = 0; i < input->size; i++) {
@@ -2029,7 +1998,6 @@ void optimize_transfer_chain(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
 /*******************************************************************************
@@ -2107,7 +2075,6 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
  * INCs that sum to 0 are eliminated entirely.
  ******************************************************************************/
 void optimize_inc_cancellation(Program *output, const Program *input) {
-  memset(output, 0, sizeof(*output));
   addr_t out_index = 0;
 
   int *skip = calloc(input->size, sizeof(int));
@@ -2158,13 +2125,14 @@ void optimize_inc_cancellation(Program *output, const Program *input) {
   free(skip);
   free(adjust);
   output->size = out_index;
-  program_calculate_loops(output);
 }
 
-static void run_pass(Program *program, void(*optimization)(Program *out, const Program* in)) {
-    Program out;
-    optimization(&out, program);
-    *program = out;
+static void run_pass(Program *program,
+                     void (*optimization)(Program *out, const Program *in)) {
+  Program out = {0};
+  optimization(&out, program);
+  program_calculate_loops(&out);
+  *program = out;
 }
 
 static void merge_right_wrapper(Program *out, const Program *in) {
@@ -2203,21 +2171,24 @@ void optimize_program(Program *program) {
   for (int iteration = 0; iteration < 10; iteration++) {
     memcpy(before_pass, program, sizeof(Program));
 
-    run_pass(program, merge_right_wrapper);  // >>> → >3
-    run_pass(program, merge_inc_wrapper); // +++ → +3
+    run_pass(program, merge_right_wrapper); // >>> → >3
+    run_pass(program, merge_inc_wrapper);   // +++ → +3
     run_pass(program, create_zeroing_sets); // [-] → SET 0
-    run_pass(program, optimize_memset); // SET > SET > SET → SET(count)
+    run_pass(program, optimize_memset);     // SET > SET > SET → SET(count)
     run_pass(program, optimize_seek_empty); // [>] → SEEK_EMPTY
     run_pass(program, optimize_multi_transfer); // [->+<] → TRANSFER + SET 0
-    run_pass(program, optimize_set_inc_merge); // SET a, INC b → SET (a+b)
+    run_pass(program, optimize_set_inc_merge);  // SET a, INC b → SET (a+b)
     run_pass(program, optimize_offsets); // eliminate RIGHT by using offsets
-    run_pass(program, optimize_divmod); // Divmod pattern detection
-    run_pass(program, eliminate_dead_stores); // Dead store elimination - MUST run before SET+TRANSFER merge
-    run_pass(program, optimize_set_transfer_merge); // SET + TRANSFER merge (requires dead stores eliminated first)
+    run_pass(program, optimize_divmod);  // Divmod pattern detection
+    run_pass(program, eliminate_dead_stores); // Dead store elimination - MUST
+                                              // run before SET+TRANSFER merge
+    run_pass(program,
+             optimize_set_transfer_merge); // SET + TRANSFER merge (requires
+                                           // dead stores eliminated first)
     run_pass(program, optimize_inc_transfer_merge); // INC + TRANSFER merge
     run_pass(program, optimize_transfer_chain); // Transfer chain optimization
     run_pass(program, optimize_eliminate_temp_cells); // Temp cell elimination
-    run_pass(program, optimize_inc_cancellation); // INC cancellation
+    run_pass(program, optimize_inc_cancellation);     // INC cancellation
 
     // Check for fixed point
     const int changed = memcmp(before_pass, program, sizeof(Program)) != 0;
