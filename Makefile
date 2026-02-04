@@ -1,10 +1,10 @@
 CC = gcc
 CFLAGS = -std=c11 -O3
 LDFLAGS =
-SOURCES = codegen_c.c codegen_nasm.c machine.c main.c optimizer.c
+SOURCES = codegen_c.c codegen_nasm.c codegen_llvm.c machine.c main.c optimizer.c
 OBJECTS = $(SOURCES:.c=.o)
 TARGET = bft
-TEST_SOURCES = codegen_c.c codegen_nasm.c machine.c optimizer.c test.c
+TEST_SOURCES = codegen_c.c codegen_nasm.c codegen_llvm.c machine.c optimizer.c test.c
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_TARGET = test
 

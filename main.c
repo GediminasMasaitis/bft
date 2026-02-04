@@ -12,8 +12,8 @@ static void print_usage(const char *prog_name) {
   fprintf(stderr, "  -r, --run         Run the program (default)\n");
   fprintf(stderr, "  -c, --emit-c      Generate C code\n");
   fprintf(stderr, "  -s, --emit-asm    Generate NASM assembly\n");
-  fprintf(stderr,
-          "  -o, --output FILE Write output to FILE instead of stdout\n");
+  fprintf(stderr, "  -l, --emit-llvm   Generate LLVM IR\n");
+  fprintf(stderr, "  -o, --output FILE Write output to FILE instead of stdout\n");
   fprintf(stderr, "  -d, --dump        Dump optimized instructions\n");
   fprintf(stderr, "  -h, --help        Show this help message\n");
 }
@@ -102,7 +102,7 @@ static void dump_instructions(const Program *program) {
   putchar('\n');
 }
 
-enum { MODE_RUN, MODE_EMIT_C, MODE_EMIT_ASM };
+enum { MODE_RUN, MODE_EMIT_C, MODE_EMIT_ASM, MODE_EMIT_LLVM };
 
 int main(int argc, char **argv) {
   int mode = MODE_RUN;
@@ -114,13 +114,14 @@ int main(int argc, char **argv) {
       {"run", no_argument, 0, 'r'},
       {"emit-c", no_argument, 0, 'c'},
       {"emit-asm", no_argument, 0, 's'},
+      {"emit-llvm", no_argument, 0, 'l'},
       {"output", required_argument, 0, 'o'},
       {"dump", no_argument, 0, 'd'},
       {"help", no_argument, 0, 'h'},
       {0, 0, 0, 0}};
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "rcso:dh", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "rcslo:dh", long_options, NULL)) != -1) {
     switch (opt) {
     case 'r':
       mode = MODE_RUN;
@@ -130,6 +131,9 @@ int main(int argc, char **argv) {
       break;
     case 's':
       mode = MODE_EMIT_ASM;
+      break;
+    case 'l':
+      mode = MODE_EMIT_LLVM;
       break;
     case 'o':
       output_path = optarg;
@@ -208,6 +212,9 @@ int main(int argc, char **argv) {
     break;
   case MODE_EMIT_ASM:
     codegen_nasm(&machine->program, output);
+    break;
+  case MODE_EMIT_LLVM:
+    codegen_llvm(&machine->program, output);
     break;
   }
 

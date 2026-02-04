@@ -135,7 +135,6 @@ status_t program_calculate_loops(Program *program);
 status_t machine_run(Machine *machine);
 
 void optimize_program(Program *program);
-
 void codegen_c(const Program *program, FILE *output);
-
 void codegen_nasm(const Program *program, FILE *output);
+void codegen_llvm(const Program *program, FILE *output);
