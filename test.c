@@ -40,7 +40,8 @@ typedef enum {
   BACKEND_COUNT
 } Backend;
 
-static const char *backend_names[] = {"Interpreter", "C Codegen", "NASM Codegen"};
+static const char *backend_names[] = {"Interpreter", "C Codegen",
+                                      "NASM Codegen"};
 
 /*******************************************************************************
  * Timing utilities
@@ -262,8 +263,7 @@ static int run_interpreter(const char *bf_path, char **output,
  ******************************************************************************/
 
 static void test_c_backend(const char *bf_path, const char *basename,
-                           BackendResult *result,
-                           const char *expected_output,
+                           BackendResult *result, const char *expected_output,
                            size_t expected_size) {
   strcpy(result->name, "C Codegen");
   result->passed = 0;
@@ -312,7 +312,8 @@ static void test_c_backend(const char *bf_path, const char *basename,
   result->run_time_ms = run_result.elapsed_ms;
 
   if (run_result.timed_out) {
-    snprintf(result->error_msg, sizeof(result->error_msg), "Execution timed out");
+    snprintf(result->error_msg, sizeof(result->error_msg),
+             "Execution timed out");
     result->timed_out = 1;
     free_exec_result(&run_result);
     unlink(c_path);
@@ -336,8 +337,8 @@ static void test_c_backend(const char *bf_path, const char *basename,
 
   if (!result->outputs_match) {
     snprintf(result->error_msg, sizeof(result->error_msg),
-             "Output mismatch: expected %zu bytes, got %zu bytes", expected_size,
-             run_result.output_size);
+             "Output mismatch: expected %zu bytes, got %zu bytes",
+             expected_size, run_result.output_size);
   }
 
   result->passed = result->outputs_match;
@@ -419,7 +420,8 @@ static void test_nasm_backend(const char *bf_path, const char *basename,
   result->run_time_ms = run_result.elapsed_ms;
 
   if (run_result.timed_out) {
-    snprintf(result->error_msg, sizeof(result->error_msg), "Execution timed out");
+    snprintf(result->error_msg, sizeof(result->error_msg),
+             "Execution timed out");
     result->timed_out = 1;
     free_exec_result(&run_result);
     unlink(asm_path);
@@ -445,8 +447,8 @@ static void test_nasm_backend(const char *bf_path, const char *basename,
 
   if (!result->outputs_match) {
     snprintf(result->error_msg, sizeof(result->error_msg),
-             "Output mismatch: expected %zu bytes, got %zu bytes", expected_size,
-             run_result.output_size);
+             "Output mismatch: expected %zu bytes, got %zu bytes",
+             expected_size, run_result.output_size);
   }
 
   result->passed = result->outputs_match;
@@ -529,9 +531,12 @@ int main(int argc, char **argv) {
   }
 
   printf("\n");
-  printf("╔════════════════════════════════════════════════════════════════════╗\n");
-  printf("║           BFT - Brainfuck Transpiler Test Suite                    ║\n");
-  printf("╚════════════════════════════════════════════════════════════════════╝\n");
+  printf("╔════════════════════════════════════════════════════════════════════"
+         "╗\n");
+  printf("║           BFT - Brainfuck Transpiler Test Suite                    "
+         "║\n");
+  printf("╚════════════════════════════════════════════════════════════════════"
+         "╝\n");
   printf("\n");
 
   /* Check for required tools */
@@ -598,9 +603,8 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     double interp_time;
-    int status =
-        run_interpreter(programs[i], &tr->reference_output,
-                        &tr->reference_output_size, &interp_time);
+    int status = run_interpreter(programs[i], &tr->reference_output,
+                                 &tr->reference_output_size, &interp_time);
 
     BackendResult *interp_result = &tr->backends[BACKEND_INTERPRETER];
     strcpy(interp_result->name, "Interpreter");
@@ -687,15 +691,19 @@ int main(int argc, char **argv) {
 
   /* Print summary table */
   printf("\n");
-  printf("╔════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
-  printf("║                                         SUMMARY TABLE                                                  ║\n");
-  printf("╚════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+  printf("╔════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╗\n");
+  printf("║                                         SUMMARY TABLE              "
+         "                                    ║\n");
+  printf("╚════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╝\n");
   printf("\n");
 
   /* Header */
-  printf("%-15s │ %-12s │ %-8s │ %-12s │ %-12s │ %-10s │ %-6s\n",
-         "Program", "Backend", "Status", "Gen (ms)", "Build (ms)", "Run (ms)", "Output");
-  printf("────────────────┼──────────────┼──────────┼──────────────┼──────────────┼────────────┼────────\n");
+  printf("%-15s │ %-12s │ %-8s │ %-12s │ %-12s │ %-10s │ %-6s\n", "Program",
+         "Backend", "Status", "Gen (ms)", "Build (ms)", "Run (ms)", "Output");
+  printf("────────────────┼──────────────┼──────────┼──────────────┼───────────"
+         "───┼────────────┼────────\n");
 
   for (int i = 0; i < program_count; i++) {
     TestResult *tr = &results[i];
@@ -758,16 +766,20 @@ int main(int argc, char **argv) {
       printf("\n");
     }
     if (i < program_count - 1) {
-      printf("────────────────┼──────────────┼──────────┼──────────────┼──────────────┼────────────┼────────\n");
+      printf("────────────────┼──────────────┼──────────┼──────────────┼───────"
+             "───────┼────────────┼────────\n");
     }
   }
 
   printf("\n");
 
   /* Generated code statistics */
-  printf("╔════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
-  printf("║                                   GENERATED CODE STATISTICS                                            ║\n");
-  printf("╚════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+  printf("╔════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╗\n");
+  printf("║                                   GENERATED CODE STATISTICS        "
+         "                                    ║\n");
+  printf("╚════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╝\n");
   printf("\n");
 
   printf("%-15s │ %-20s │ %-20s\n", "Program", "C (lines / chars)",
@@ -798,14 +810,18 @@ int main(int argc, char **argv) {
   printf("\n");
 
   /* Performance comparison */
-  printf("╔════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
-  printf("║                                    PERFORMANCE COMPARISON                                              ║\n");
-  printf("╚════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+  printf("╔════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╗\n");
+  printf("║                                    PERFORMANCE COMPARISON          "
+         "                                    ║\n");
+  printf("╚════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╝\n");
   printf("\n");
 
   printf("%-15s │ %-15s │ %-15s │ %-15s │ %-12s │ %-12s\n", "Program",
          "Interp (ms)", "C (ms)", "NASM (ms)", "C Speedup", "NASM Speedup");
-  printf("────────────────┼─────────────────┼─────────────────┼─────────────────┼──────────────┼─────────────\n");
+  printf("────────────────┼─────────────────┼─────────────────┼────────────────"
+         "─┼──────────────┼─────────────\n");
 
   for (int i = 0; i < program_count; i++) {
     TestResult *tr = &results[i];
@@ -853,9 +869,12 @@ int main(int argc, char **argv) {
   printf("\n");
 
   /* Final summary */
-  printf("╔════════════════════════════════════════════════════════════════════════════════════════════════════════╗\n");
-  printf("║                                        FINAL RESULTS                                                   ║\n");
-  printf("╚════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n");
+  printf("╔════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╗\n");
+  printf("║                                        FINAL RESULTS               "
+         "                                    ║\n");
+  printf("╚════════════════════════════════════════════════════════════════════"
+         "════════════════════════════════════╝\n");
   printf("\n");
   printf("  Total tests run:  %d\n", total_tests);
   printf("  Tests passed:     %d\n", passed_tests);

@@ -1853,7 +1853,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
 
           /* Additive TRANSFER FROM temp - compose factors */
-          /* Only valid if temp cell starts at zero (so temp = source*F1 + B1) */
+          /* Only valid if temp cell starts at zero (so temp = source*F1 + B1)
+           */
           if (future->op == OP_TRANSFER &&
               future->transfer.src_offset == temp_off &&
               future->transfer.is_assignment == 0 &&
@@ -1863,9 +1864,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
                */
               i32 composed_offset = future->transfer.targets[t].offset;
               i32 composed_factor = F1 * future->transfer.targets[t].factor;
-              i32 composed_bias =
-                  B1 * future->transfer.targets[t].factor +
-                  future->transfer.targets[t].bias;
+              i32 composed_bias = B1 * future->transfer.targets[t].factor +
+                                  future->transfer.targets[t].bias;
 
               /* Check if this restores source (factor=1, bias=0 to source) */
               if (composed_offset == source_off && composed_factor == 1 &&
