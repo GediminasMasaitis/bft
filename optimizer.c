@@ -1025,6 +1025,32 @@ void optimize_offsets(Program *output, const Program *original) {
 }
 
 /*******************************************************************************
+ * HELPER: SET COVERS OFFSET
+ *
+ * Returns true if an OP_SET instruction (single-cell or multi-cell) writes
+ * to the cell at the given offset. Handles stride=1 (contiguous) and
+ * arbitrary stride (strided) multi-cell SETs.
+ ******************************************************************************/
+static int set_covers_offset(const Instruction *instr, const i32 offset) {
+  if (instr->set.count == 1) {
+    return instr->set.offset == offset;
+  }
+  /* Multi-cell SET: check if offset is in range */
+  if (instr->set.stride <= 1) {
+    return offset >= instr->set.offset &&
+           offset < instr->set.offset + instr->set.count;
+  }
+  if (offset < instr->set.offset) {
+    return 0;
+  }
+  const i32 diff = offset - instr->set.offset;
+  if (diff % instr->set.stride != 0) {
+    return 0;
+  }
+  return diff / instr->set.stride < instr->set.count;
+}
+
+/*******************************************************************************
  * HELPER: IS CELL ASSIGNMENT
  *
  * Returns true if the instruction completely overwrites the cell at the given
@@ -1038,23 +1064,7 @@ void optimize_offsets(Program *output, const Program *original) {
  ******************************************************************************/
 static int is_cell_assignment(const Instruction *instr, const i32 offset) {
   if (instr->op == OP_SET) {
-    if (instr->set.count == 1) {
-      /* Single-cell SET */
-      return instr->set.offset == offset;
-    }
-    /* Multi-cell SET: check if offset is in the range being set */
-    if (instr->set.stride <= 1) {
-      return offset >= instr->set.offset &&
-             offset < instr->set.offset + instr->set.count;
-    }
-    if (offset < instr->set.offset) {
-      return 0;
-    }
-    const i32 diff = offset - instr->set.offset;
-    if (diff % instr->set.stride != 0) {
-      return 0;
-    }
-    return diff / instr->set.stride < instr->set.count;
+    return set_covers_offset(instr, offset);
   }
   if (instr->op == OP_IN && instr->in.offset == offset) {
     return 1;
@@ -1691,21 +1701,9 @@ static int is_cell_known_zero(const Program *input, const addr_t i,
   for (addr_t k = i; k > 0; k--) {
     const Instruction *prev = &input->instructions[k - 1];
 
-    /* SET at the adjusted offset */
-    if (prev->op == OP_SET && prev->set.count == 1 &&
-        prev->set.offset == adjusted_offset) {
+    /* SET at the adjusted offset (single-cell or multi-cell) */
+    if (prev->op == OP_SET && set_covers_offset(prev, adjusted_offset)) {
       return prev->set.value == 0;
-    }
-
-    /* Multi-cell SET might touch our offset */
-    if (prev->op == OP_SET && prev->set.count > 1) {
-      const i32 start = prev->set.offset;
-      const i32 stride = prev->set.stride <= 1 ? 1 : prev->set.stride;
-      for (i32 c = 0; c < prev->set.count; c++) {
-        if (start + c * stride == adjusted_offset) {
-          return prev->set.value == 0;
-        }
-      }
     }
 
     /* INC modifies the cell */
@@ -2029,22 +2027,7 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
   case OP_INC:
     return instr->inc.offset == offset;
   case OP_SET:
-    if (instr->set.count == 1) {
-      return instr->set.offset == offset;
-    }
-    /* Multi-cell SET - check if offset is in range */
-    if (instr->set.stride <= 1) {
-      return offset >= instr->set.offset &&
-             offset < instr->set.offset + instr->set.count;
-    }
-    if (offset < instr->set.offset) {
-      return 0;
-    }
-    const i32 diff = offset - instr->set.offset;
-    if (diff % instr->set.stride != 0) {
-      return 0;
-    }
-    return diff / instr->set.stride < instr->set.count;
+    return set_covers_offset(instr, offset);
   case OP_OUT:
     return instr->out.offset == offset;
   case OP_IN:
