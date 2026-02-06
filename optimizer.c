@@ -121,9 +121,6 @@
  * To enable unsafe mode: compile with -DUNSAFE_TRANSFER_CHAIN
  */
 
-static int instr_touches_offset_for_cancel(const Instruction *instr,
-                                           const i32 offset);
-
 static i32 get_offset(const Instruction *instr) {
   switch (instr->op) {
   case OP_INC:
@@ -223,6 +220,678 @@ static int transfer_target_has_offset(const Instruction *instr,
 static int transfer_touches_offset(const Instruction *instr, const i32 offset) {
   return instr->transfer.src_offset == offset ||
          transfer_target_has_offset(instr, offset);
+}
+
+/*******************************************************************************
+ * HELPER: SET COVERS OFFSET
+ *
+ * Returns true if an OP_SET instruction (single-cell or multi-cell) writes
+ * to the cell at the given offset. Handles stride=1 (contiguous) and
+ * arbitrary stride (strided) multi-cell SETs.
+ ******************************************************************************/
+static int set_covers_offset(const Instruction *instr, const i32 offset) {
+  if (instr->set.count == 1) {
+    return instr->set.offset == offset;
+  }
+  /* Multi-cell SET: check if offset is in range */
+  if (instr->set.stride <= 1) {
+    return offset >= instr->set.offset &&
+           offset < instr->set.offset + instr->set.count;
+  }
+  if (offset < instr->set.offset) {
+    return 0;
+  }
+  const i32 diff = offset - instr->set.offset;
+  if (diff % instr->set.stride != 0) {
+    return 0;
+  }
+  return diff / instr->set.stride < instr->set.count;
+}
+
+/*******************************************************************************
+ * HELPER: IS CELL ASSIGNMENT
+ *
+ * Returns true if the instruction completely overwrites the cell at the given
+ * offset, making any previous value irrelevant (dead).
+ *
+ * Assignment operations:
+ *   - SET (single-cell or multi-cell if offset is in range)
+ *   - IN (reads from input, replacing cell value)
+ *   - MOD (assigns remainder to target)
+ *   - Assignment-mode TRANSFER with single target (arg2 == 1, arg == 1)
+ ******************************************************************************/
+static int is_cell_assignment(const Instruction *instr, const i32 offset) {
+  if (instr->op == OP_SET) {
+    return set_covers_offset(instr, offset);
+  }
+  if (instr->op == OP_IN && instr->in.offset == offset) {
+    return 1;
+  }
+  if (instr->op == OP_MOD && instr->mod.dst_offset == offset) {
+    return 1;
+  }
+  if (instr->op == OP_TRANSFER && instr->transfer.is_assignment == 1 &&
+      instr->transfer.target_count == 1 &&
+      instr->transfer.targets[0].offset == offset) {
+    return 1;
+  }
+  return 0;
+}
+
+/*******************************************************************************
+ * HELPER: INSTRUCTION USES CELL
+ *
+ * Returns true if the instruction reads from (uses) the cell at the given
+ *offset.
+ *
+ * This is used by dead store elimination: if a cell is read between a write
+ * and a later overwrite, the earlier write is NOT dead.
+ *
+ * Returns 1 (conservatively assumes usage) for control flow instructions
+ * since we can't reliably track what happens inside loops.
+ ******************************************************************************/
+static int instruction_uses_cell(const Instruction *instr, const i32 offset) {
+  switch (instr->op) {
+  case OP_INC:
+    return instr->inc.offset == offset;
+
+  case OP_OUT:
+    return instr->out.offset == offset;
+
+  case OP_SET:
+    return 0; /* SET only writes, never reads */
+
+  case OP_IN:
+    return 0; /* IN only writes */
+
+  case OP_DIV:
+  case OP_MOD:
+    return instr->div.src_offset == offset; /* Reads dividend */
+
+  case OP_TRANSFER:
+    /* Reads source cell */
+    if (instr->transfer.src_offset == offset)
+      return 1;
+    /* Additive TRANSFER (is_assignment == 0) also reads target cells (to add to
+     * them) */
+    if (instr->transfer.is_assignment != 1) {
+      for (int t = 0; t < instr->transfer.target_count; t++) {
+        if (instr->transfer.targets[t].offset == offset)
+          return 1;
+      }
+    }
+    return 0;
+
+    /* Control flow - conservative, assume any cell might be used */
+  case OP_LOOP:
+  case OP_END:
+  case OP_RIGHT:
+  case OP_SEEK_EMPTY:
+    return 1;
+
+  default:
+    return 1;
+  }
+}
+
+/*******************************************************************************
+ * HELPER: INSTRUCTION TOUCHES OFFSET FOR CANCELLATION
+ *
+ * Returns true if the instruction interacts with the cell at the given offset
+ * in any way (read or write). Used by INC cancellation to determine when
+ * INC merging must stop.
+ *
+ * More conservative than instruction_uses_cell - we stop at ANY interaction.
+ ******************************************************************************/
+static int instr_touches_offset_for_cancel(const Instruction *instr,
+                                           const i32 offset) {
+  switch (instr->op) {
+  case OP_INC:
+    return instr->inc.offset == offset;
+  case OP_SET:
+    return set_covers_offset(instr, offset);
+  case OP_OUT:
+    return instr->out.offset == offset;
+  case OP_IN:
+    return instr->in.offset == offset;
+  case OP_DIV:
+  case OP_MOD:
+    return instr->div.src_offset == offset || instr->div.dst_offset == offset;
+  case OP_TRANSFER:
+    return transfer_touches_offset(instr, offset);
+    /* Control flow - conservatively touches everything */
+  case OP_LOOP:
+  case OP_END:
+  case OP_RIGHT:
+  case OP_SEEK_EMPTY:
+    return 1;
+  default:
+    return 1;
+  }
+}
+
+/*******************************************************************************
+ * PASS: TRANSFER LOOP ANALYSIS (analyze_multi_transfer)
+ *
+ * Analyzes a loop to determine if it's a "transfer loop" - a loop that
+ * distributes the value of one cell to multiple target cells while
+ * decrementing the source to zero.
+ *
+ * ALGORITHM:
+ * 1. Walk through the loop body, tracking relative position (current_offset)
+ * 2. For each INC instruction, record which offset it modifies and by how much
+ * 3. Verify that:
+ *    a) The loop is "balanced" - pointer returns to start (current_offset == 0)
+ *    b) The source cell (offset 0) is decremented by an odd amount per
+ *iteration c) Only RIGHT and INC operations are present (no I/O, nested loops,
+ *etc.)
+ *
+ * EXAMPLE: [->+>++<<] (copy to dp+1, add 2x to dp+2)
+ *   - Offset 0 (source): INC -1 per iteration (decrement by 1)
+ *   - Offset 1: INC +1 per iteration → factor = 1
+ *   - Offset 2: INC +2 per iteration → factor = 2
+ *
+ * FACTOR CALCULATION:
+ * If the source decrements by D per iteration and a target increments by F:
+ *   - The loop runs for (source_value / D) iterations (in modular arithmetic)
+ *   - Target accumulates (source_value / D) * F = source_value * (F/D)
+ *   - So the effective factor stored is F/D
+ *
+ * For this to work cleanly, F must be divisible by D when D > 1.
+ *
+ * WHY ODD DECREMENT?
+ * An odd decrement guarantees termination because gcd(odd, 256) = 1.
+ * This means the sequence source, source-D, source-2D, ... (mod 256)
+ * will eventually hit 0 regardless of starting value.
+ *
+ * Returns: number of transfer targets (0 if not a valid transfer loop)
+ ******************************************************************************/
+static int analyze_multi_transfer(const Program *program,
+                                  const addr_t loop_start,
+                                  TransferTarget *targets) {
+  /* Start after the LOOP instruction (caller already verified it's OP_LOOP) */
+  addr_t i = loop_start + 1;
+
+  /* Track relative position within loop body */
+  i32 current_offset = 0;
+
+  /* Record net change to each offset touched in the loop */
+  i32 offsets[MAX_TRANSFER_TARGETS + 1]; /* +1 for source cell at offset 0 */
+  i32 factors[MAX_TRANSFER_TARGETS + 1]; /* net increment per iteration */
+  int num_entries = 0;
+
+  /* Scan loop body */
+  while (i < program->size && program->instructions[i].op != OP_END) {
+    const Instruction *instr = &program->instructions[i];
+
+    switch (instr->op) {
+    case OP_RIGHT:
+      current_offset += instr->right.distance;
+      break;
+
+    case OP_INC: {
+      /* Find existing entry for this offset or create new one */
+      int found = 0;
+      for (int j = 0; j < num_entries; j++) {
+        if (offsets[j] == current_offset) {
+          factors[j] += instr->inc.count;
+          found = 1;
+          break;
+        }
+      }
+      if (!found) {
+        if (num_entries >= MAX_TRANSFER_TARGETS + 1)
+          return 0; /* Too many distinct offsets */
+        offsets[num_entries] = current_offset;
+        factors[num_entries] = instr->inc.count;
+        num_entries++;
+      }
+    } break;
+
+      /* These operations disqualify the loop from being a simple transfer */
+    case OP_LOOP: /* Nested loops are too complex */
+    case OP_END:
+    case OP_IN: /* I/O has side effects */
+    case OP_OUT:
+    case OP_SET: /* Already-optimized ops shouldn't appear here */
+    case OP_SEEK_EMPTY:
+    case OP_TRANSFER:
+      return 0;
+
+    default:
+      return 0;
+    }
+    i++;
+  }
+
+  /* Verify loop ends properly */
+  if (i >= program->size || program->instructions[i].op != OP_END) {
+    return 0;
+  }
+
+  /* Loop must be balanced: pointer returns to starting position */
+  if (current_offset != 0) {
+    return 0;
+  }
+
+  /* Find change to source cell (offset 0) */
+  int source_change = 0;
+  for (int j = 0; j < num_entries; j++) {
+    if (offsets[j] == 0) {
+      source_change = factors[j];
+      break;
+    }
+  }
+
+  /* Source must be decremented (negative change) */
+  if (source_change >= 0) {
+    return 0;
+  }
+
+  /* Decrement must be odd to guarantee termination */
+  if ((source_change & 1) == 0) {
+    return 0;
+  }
+
+  const i32 decrement_mag = -source_change; /* Make positive */
+
+  /* Build list of transfer targets (non-source cells with non-zero change) */
+  int num_targets = 0;
+  for (int j = 0; j < num_entries; j++) {
+    if (offsets[j] != 0 && factors[j] != 0) {
+      /*
+       * When decrement > 1, the per-iteration increment must divide evenly.
+       * E.g., if source decrements by 3 and target increments by 6,
+       * then effective factor is 6/3 = 2.
+       */
+      if (decrement_mag > 1 && (factors[j] % decrement_mag) != 0) {
+        return 0;
+      }
+
+      targets[num_targets].offset = offsets[j];
+      targets[num_targets].factor = factors[j] / decrement_mag;
+      targets[num_targets].bias = 0;
+      num_targets++;
+    }
+  }
+
+  return num_targets;
+}
+
+/*******************************************************************************
+ * HELPER: ANALYZE LOOP BALANCE
+ *
+ * Determines if a loop has zero net pointer movement per iteration.
+ *
+ * A "balanced" loop allows the optimizer to use offsets throughout the loop
+ * body without emitting actual pointer movements. This is key to offset
+ * threading optimization.
+ *
+ * The function recursively checks nested loops - they must also be balanced
+ * with zero net movement for the outer loop to be considered balanced.
+ *
+ * Returns: 1 if the loop can be analyzed, 0 otherwise
+ * Sets *net_movement to the total pointer displacement per iteration
+ ******************************************************************************/
+static int analyze_loop_balance(const Program *program, const addr_t loop_start,
+                                i32 *net_movement) {
+  /* Caller already verified program->instructions[loop_start].op == OP_LOOP */
+  i32 movement = 0;
+  i32 depth = 1;
+  addr_t i = loop_start + 1;
+
+  while (i < program->size && depth > 0) {
+    const Instruction *instr = &program->instructions[i];
+
+    switch (instr->op) {
+    case OP_RIGHT:
+      movement += instr->right.distance;
+      break;
+
+    case OP_LOOP:
+      depth++;
+      /* Recursively check nested loop */
+      i32 child_move;
+      const i32 child_movable = analyze_loop_balance(program, i, &child_move);
+      if (!child_movable) {
+        return 0; /* Can't analyze nested loop */
+      }
+      if (child_move != 0) {
+        return 0; /* Nested loop has unpredictable movement */
+      }
+      break;
+
+    case OP_END:
+      depth--;
+      break;
+
+      /* These don't affect pointer position */
+    case OP_INC:
+    case OP_SET:
+    case OP_OUT:
+    case OP_IN:
+    case OP_TRANSFER:
+    case OP_DIV:
+    case OP_MOD:
+      break;
+
+      /* SEEK_EMPTY has data-dependent movement - can't analyze */
+    case OP_SEEK_EMPTY:
+      return 0;
+
+    default:
+      fprintf(stderr, "analyze_loop_balance: unknown instruction %d\n",
+              instr->op);
+      exit(1);
+      return 0;
+    }
+    i++;
+  }
+
+  if (depth != 0) {
+    fprintf(stderr, "analyze_loop_balance: unmatched loop at instruction %u\n",
+            loop_start);
+    exit(1);
+    return 0;
+  }
+
+  *net_movement = movement;
+  return 1;
+}
+
+/*******************************************************************************
+ * HELPER: MERGE INC INTO TRANSFER
+ *
+ * Attempts to fold an INC instruction into a TRANSFER's bias.
+ *
+ * CASE 1: INC targets a TRANSFER destination cell
+ *   Original: TRANSFER ... target @X (factor F, bias B) ..., then INC n @X
+ *   Merged:   TRANSFER ... target @X (factor F, bias B+n) ...
+ *   Correctness: target += src*F + B, then target += n
+ *                equals target += src*F + (B+n) ✓
+ *
+ * CASE 2: INC targets the TRANSFER's source cell (INC comes BEFORE TRANSFER)
+ *   Original: INC n @src, then TRANSFER @src -> targets (factor F, bias B)
+ *   Merged:   TRANSFER @src -> targets (factor F, bias B + n*F)
+ *   Correctness: src becomes src+n, targets += (src+n)*F + B = src*F + n*F + B
+ *                Merged reads original src: targets += src*F + (B + n*F) ✓
+ *
+ *   IMPORTANT: The INC is removed, so the source cell is NOT incremented.
+ *   This is safe because TRANSFERs from optimize_multi_transfer are always
+ *   followed by SET 0 on the source, making the INC's effect irrelevant.
+ *
+ * Returns 1 if merge was successful, 0 otherwise.
+ ******************************************************************************/
+static int merge_inc_into_transfer(Instruction *transfer,
+                                   const Instruction *inc) {
+  /* Case 1: INC on a destination cell */
+  int target_idx = -1;
+  for (int t = 0; t < transfer->transfer.target_count; t++) {
+    if (transfer->transfer.targets[t].offset == inc->inc.offset) {
+      target_idx = t;
+    }
+  }
+
+  if (target_idx >= 0) {
+    transfer->transfer.targets[target_idx].bias += inc->inc.count;
+    return 1;
+  }
+
+  /* Case 2: INC on source cell */
+  if (inc->inc.offset == transfer->transfer.src_offset) {
+    for (int t = 0; t < transfer->transfer.target_count; t++) {
+      transfer->transfer.targets[t].bias +=
+          inc->inc.count * transfer->transfer.targets[t].factor;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
+/*******************************************************************************
+ * PASS: DIVMOD PATTERN ANALYSIS (analyze_divmod_pattern)
+ *
+ * Recognizes a specific 6-instruction loop pattern that implements integer
+ * division and modulo using a countdown technique.
+ *
+ * The exact pattern structure is:
+ *   LOOP @dividend_off
+ *   INC -1 @dividend_off
+ *   TRANSFER @remainder_off -> @temp_off (factor=-1, bias=divisor-1),
+ *                              @quotient_off (factor=1, bias=0)
+ *   TRANSFER @temp_off -> @remainder_off (assignment, factor=1)
+ *   SET 0 @temp_off
+ *   END @dividend_off
+ *
+ * The divisor is encoded as (transfer1.targets[0].bias + 1).
+ *
+ * Returns 1 if pattern matches, 0 otherwise.
+ * Sets output parameters to the relevant cell offsets and divisor value.
+ ******************************************************************************/
+static int analyze_divmod_pattern(const Program *program,
+                                  const addr_t loop_start, i32 *dividend_off,
+                                  i32 *divisor, i32 *quotient_off,
+                                  i32 *remainder_off, i32 *temp_off) {
+  /* Need exactly 6 instructions (caller already verified loop_start is OP_LOOP)
+   */
+  if (loop_start + 5 >= program->size) {
+    return 0;
+  }
+
+  const Instruction *loop_instr = &program->instructions[loop_start];
+  const Instruction *inc_instr = &program->instructions[loop_start + 1];
+  const Instruction *transfer1 = &program->instructions[loop_start + 2];
+  const Instruction *transfer2 = &program->instructions[loop_start + 3];
+  const Instruction *set_instr = &program->instructions[loop_start + 4];
+  const Instruction *end_instr = &program->instructions[loop_start + 5];
+
+  /* Verify END matches LOOP */
+  if (end_instr->op != OP_END || end_instr->end.match_addr != (i32)loop_start) {
+    return 0;
+  }
+  if (end_instr->end.offset != loop_instr->loop.offset) {
+    return 0;
+  }
+
+  /* Must decrement dividend by 1 */
+  if (inc_instr->op != OP_INC || inc_instr->inc.count != -1 ||
+      inc_instr->inc.offset != loop_instr->loop.offset) {
+    return 0;
+  }
+
+  /* First TRANSFER: 2 targets, additive mode (is_assignment=0) */
+  if (transfer1->op != OP_TRANSFER || transfer1->transfer.target_count != 2 ||
+      transfer1->transfer.is_assignment != 0) {
+    return 0;
+  }
+
+  /* First target is temp with factor -1 */
+  if (transfer1->transfer.targets[0].factor != -1) {
+    return 0;
+  }
+
+  /* Second target is quotient with factor 1, no bias */
+  if (transfer1->transfer.targets[1].factor != 1 ||
+      transfer1->transfer.targets[1].bias != 0) {
+    return 0;
+  }
+
+  /* Second TRANSFER: assignment (is_assignment=1) from temp to remainder */
+  if (transfer2->op != OP_TRANSFER || transfer2->transfer.target_count != 1 ||
+      transfer2->transfer.is_assignment != 1) {
+    return 0;
+  }
+
+  /* Source of second TRANSFER must be temp cell */
+  if (transfer2->transfer.src_offset != transfer1->transfer.targets[0].offset) {
+    return 0;
+  }
+
+  /* Destination must be remainder (same as first TRANSFER's source), factor 1
+   */
+  if (transfer2->transfer.targets[0].offset != transfer1->transfer.src_offset ||
+      transfer2->transfer.targets[0].factor != 1) {
+    return 0;
+  }
+
+  /* SET clears temp cell */
+  if (set_instr->op != OP_SET || set_instr->set.value != 0 ||
+      set_instr->set.count != 1) {
+    return 0;
+  }
+  if (set_instr->set.offset != transfer1->transfer.targets[0].offset) {
+    return 0;
+  }
+
+  /* Extract values */
+  *dividend_off = loop_instr->loop.offset;
+  *divisor =
+      transfer1->transfer.targets[0].bias + 1; /* divisor encoded as bias+1 */
+  *quotient_off = transfer1->transfer.targets[1].offset;
+  *remainder_off =
+      transfer1->transfer.src_offset; /* source of first TRANSFER */
+  *temp_off = transfer1->transfer.targets[0].offset;
+
+  /* Divisor must be at least 2 */
+  if (*divisor < 2) {
+    return 0;
+  }
+
+  return 1;
+}
+
+/*******************************************************************************
+ * HELPER: IS CELL KNOWN ZERO
+ *
+ * Determines if a cell at a given offset is provably zero before instruction i.
+ * Scans backward, adjusting the offset when crossing RIGHT instructions.
+ *
+ * For transfer chain optimization, we've already found SET 0 @temp at set_idx,
+ * which clears temp at end of each loop iteration. We just need to verify
+ * temp was zero before the loop (for the first iteration).
+ *
+ * Returns: 1 if cell is provably zero, 0 otherwise
+ ******************************************************************************/
+static int is_cell_known_zero(const Program *input, const addr_t i,
+                              const i32 offset) {
+  i32 adjusted_offset = offset;
+
+  for (addr_t k = i; k > 0; k--) {
+    const Instruction *prev = &input->instructions[k - 1];
+
+    /* SET at the adjusted offset (single-cell or multi-cell) */
+    if (prev->op == OP_SET && set_covers_offset(prev, adjusted_offset)) {
+      return prev->set.value == 0;
+    }
+
+    /* INC modifies the cell */
+    if (prev->op == OP_INC && prev->inc.offset == adjusted_offset) {
+      return 0;
+    }
+
+    /* IN writes to the cell */
+    if (prev->op == OP_IN && prev->in.offset == adjusted_offset) {
+      return 0;
+    }
+
+    /* TRANSFER might write to the cell */
+    if (prev->op == OP_TRANSFER &&
+        transfer_target_has_offset(prev, adjusted_offset)) {
+      return 0;
+    }
+
+    /* DIV/MOD write to dst_offset */
+    if ((prev->op == OP_DIV || prev->op == OP_MOD) &&
+        prev->div.dst_offset == adjusted_offset) {
+      return 0;
+    }
+
+    /* LOOP: continue scanning to verify cell was zero before loop */
+    if (prev->op == OP_LOOP) {
+      continue;
+    }
+
+    /* RIGHT: adjust offset and continue (undoing the pointer movement) */
+    if (prev->op == OP_RIGHT) {
+      adjusted_offset += prev->right.distance;
+      continue;
+    }
+
+    /* END/SEEK_EMPTY: can't analyze through these */
+    if (prev->op == OP_END || prev->op == OP_SEEK_EMPTY) {
+      return 0;
+    }
+  }
+
+  /* Reached beginning of program - all cells start at zero */
+  return 1;
+}
+
+/*******************************************************************************
+ * HELPER: MERGE OR ADD TRANSFER TARGET
+ *
+ * Either merges with an existing target at the same offset (adding factors
+ * and biases for additive mode) or adds a new target. Returns 1 on success,
+ * 0 if array is full and target couldn't be added.
+ ******************************************************************************/
+static int merge_or_add_target(TransferTarget *collected, int *num_collected,
+                               i32 offset, i32 factor, i32 bias) {
+  /* Check if offset already exists in collected - if so, merge */
+  for (int i = 0; i < *num_collected; i++) {
+    if (collected[i].offset == offset) {
+      collected[i].factor += factor;
+      collected[i].bias += bias;
+      return 1;
+    }
+  }
+
+  /* Not found - add new target if space available */
+  if (*num_collected >= MAX_TRANSFER_TARGETS) {
+    return 0;
+  }
+
+  collected[*num_collected].offset = offset;
+  collected[*num_collected].factor = factor;
+  collected[*num_collected].bias = bias;
+  (*num_collected)++;
+  return 1;
+}
+
+/*******************************************************************************
+ * HELPER: COMPOSE TRANSFER TARGETS THROUGH TEMP
+ *
+ * Given a source-to-temp transfer (temp = source * temp_factor + temp_bias)
+ * and a subsequent transfer FROM temp, composes the factors and biases to
+ * produce direct source-to-final targets.
+ *
+ * For each target in `future`:
+ *   composed_factor = temp_factor * target.factor
+ *   composed_bias   = temp_bias * target.factor + target.bias
+ *
+ * Also detects source restoration (composed factor=1, bias=0 back to source).
+ *
+ * Returns 1 on success, 0 if collected array is full.
+ ******************************************************************************/
+static int compose_transfer_targets(i32 temp_factor, i32 temp_bias,
+                                    i32 source_off, const Instruction *future,
+                                    TransferTarget *collected,
+                                    int *num_collected, int *source_restored) {
+  for (int t = 0; t < future->transfer.target_count; t++) {
+    i32 offset = future->transfer.targets[t].offset;
+    i32 factor = temp_factor * future->transfer.targets[t].factor;
+    i32 bias = temp_bias * future->transfer.targets[t].factor +
+               future->transfer.targets[t].bias;
+
+    if (offset == source_off && factor == 1 && bias == 0) {
+      *source_restored = 1;
+    }
+
+    if (!merge_or_add_target(collected, num_collected, offset, factor, bias)) {
+      return 0;
+    }
+  }
+  return 1;
 }
 
 /*******************************************************************************
@@ -461,154 +1130,6 @@ void optimize_seek_empty(Program *output, const Program *input) {
 }
 
 /*******************************************************************************
- * PASS: TRANSFER LOOP ANALYSIS (analyze_multi_transfer)
- *
- * Analyzes a loop to determine if it's a "transfer loop" - a loop that
- * distributes the value of one cell to multiple target cells while
- * decrementing the source to zero.
- *
- * ALGORITHM:
- * 1. Walk through the loop body, tracking relative position (current_offset)
- * 2. For each INC instruction, record which offset it modifies and by how much
- * 3. Verify that:
- *    a) The loop is "balanced" - pointer returns to start (current_offset == 0)
- *    b) The source cell (offset 0) is decremented by an odd amount per
- *iteration c) Only RIGHT and INC operations are present (no I/O, nested loops,
- *etc.)
- *
- * EXAMPLE: [->+>++<<] (copy to dp+1, add 2x to dp+2)
- *   - Offset 0 (source): INC -1 per iteration (decrement by 1)
- *   - Offset 1: INC +1 per iteration → factor = 1
- *   - Offset 2: INC +2 per iteration → factor = 2
- *
- * FACTOR CALCULATION:
- * If the source decrements by D per iteration and a target increments by F:
- *   - The loop runs for (source_value / D) iterations (in modular arithmetic)
- *   - Target accumulates (source_value / D) * F = source_value * (F/D)
- *   - So the effective factor stored is F/D
- *
- * For this to work cleanly, F must be divisible by D when D > 1.
- *
- * WHY ODD DECREMENT?
- * An odd decrement guarantees termination because gcd(odd, 256) = 1.
- * This means the sequence source, source-D, source-2D, ... (mod 256)
- * will eventually hit 0 regardless of starting value.
- *
- * Returns: number of transfer targets (0 if not a valid transfer loop)
- ******************************************************************************/
-static int analyze_multi_transfer(const Program *program,
-                                  const addr_t loop_start,
-                                  TransferTarget *targets) {
-  /* Start after the LOOP instruction (caller already verified it's OP_LOOP) */
-  addr_t i = loop_start + 1;
-
-  /* Track relative position within loop body */
-  i32 current_offset = 0;
-
-  /* Record net change to each offset touched in the loop */
-  i32 offsets[MAX_TRANSFER_TARGETS + 1]; /* +1 for source cell at offset 0 */
-  i32 factors[MAX_TRANSFER_TARGETS + 1]; /* net increment per iteration */
-  int num_entries = 0;
-
-  /* Scan loop body */
-  while (i < program->size && program->instructions[i].op != OP_END) {
-    const Instruction *instr = &program->instructions[i];
-
-    switch (instr->op) {
-    case OP_RIGHT:
-      current_offset += instr->right.distance;
-      break;
-
-    case OP_INC: {
-      /* Find existing entry for this offset or create new one */
-      int found = 0;
-      for (int j = 0; j < num_entries; j++) {
-        if (offsets[j] == current_offset) {
-          factors[j] += instr->inc.count;
-          found = 1;
-          break;
-        }
-      }
-      if (!found) {
-        if (num_entries >= MAX_TRANSFER_TARGETS + 1)
-          return 0; /* Too many distinct offsets */
-        offsets[num_entries] = current_offset;
-        factors[num_entries] = instr->inc.count;
-        num_entries++;
-      }
-    } break;
-
-    /* These operations disqualify the loop from being a simple transfer */
-    case OP_LOOP: /* Nested loops are too complex */
-    case OP_END:
-    case OP_IN: /* I/O has side effects */
-    case OP_OUT:
-    case OP_SET: /* Already-optimized ops shouldn't appear here */
-    case OP_SEEK_EMPTY:
-    case OP_TRANSFER:
-      return 0;
-
-    default:
-      return 0;
-    }
-    i++;
-  }
-
-  /* Verify loop ends properly */
-  if (i >= program->size || program->instructions[i].op != OP_END) {
-    return 0;
-  }
-
-  /* Loop must be balanced: pointer returns to starting position */
-  if (current_offset != 0) {
-    return 0;
-  }
-
-  /* Find change to source cell (offset 0) */
-  int source_change = 0;
-  for (int j = 0; j < num_entries; j++) {
-    if (offsets[j] == 0) {
-      source_change = factors[j];
-      break;
-    }
-  }
-
-  /* Source must be decremented (negative change) */
-  if (source_change >= 0) {
-    return 0;
-  }
-
-  /* Decrement must be odd to guarantee termination */
-  if ((source_change & 1) == 0) {
-    return 0;
-  }
-
-  const i32 decrement_mag = -source_change; /* Make positive */
-
-  /* Build list of transfer targets (non-source cells with non-zero change) */
-  int num_targets = 0;
-  for (int j = 0; j < num_entries; j++) {
-    if (offsets[j] != 0 && factors[j] != 0) {
-      /*
-       * When decrement > 1, the per-iteration increment must divide evenly.
-       * E.g., if source decrements by 3 and target increments by 6,
-       * then effective factor is 6/3 = 2.
-       */
-      if (decrement_mag > 1 && (factors[j] % decrement_mag) != 0) {
-        return 0;
-      }
-
-      targets[num_targets].offset = offsets[j];
-      targets[num_targets].factor = factors[j] / decrement_mag;
-      targets[num_targets].bias = 0;
-      num_targets++;
-    }
-  }
-
-  return num_targets;
-}
-
-/*******************************************************************************
  * PASS: TRANSFER LOOP OPTIMIZATION (optimize_multi_transfer)
  *
  * Replaces transfer loops with OP_TRANSFER instructions.
@@ -815,87 +1336,6 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 }
 
 /*******************************************************************************
- * HELPER: ANALYZE LOOP BALANCE
- *
- * Determines if a loop has zero net pointer movement per iteration.
- *
- * A "balanced" loop allows the optimizer to use offsets throughout the loop
- * body without emitting actual pointer movements. This is key to offset
- * threading optimization.
- *
- * The function recursively checks nested loops - they must also be balanced
- * with zero net movement for the outer loop to be considered balanced.
- *
- * Returns: 1 if the loop can be analyzed, 0 otherwise
- * Sets *net_movement to the total pointer displacement per iteration
- ******************************************************************************/
-static int analyze_loop_balance(const Program *program, const addr_t loop_start,
-                                i32 *net_movement) {
-  /* Caller already verified program->instructions[loop_start].op == OP_LOOP */
-  i32 movement = 0;
-  i32 depth = 1;
-  addr_t i = loop_start + 1;
-
-  while (i < program->size && depth > 0) {
-    const Instruction *instr = &program->instructions[i];
-
-    switch (instr->op) {
-    case OP_RIGHT:
-      movement += instr->right.distance;
-      break;
-
-    case OP_LOOP:
-      depth++;
-      /* Recursively check nested loop */
-      i32 child_move;
-      const i32 child_movable = analyze_loop_balance(program, i, &child_move);
-      if (!child_movable) {
-        return 0; /* Can't analyze nested loop */
-      }
-      if (child_move != 0) {
-        return 0; /* Nested loop has unpredictable movement */
-      }
-      break;
-
-    case OP_END:
-      depth--;
-      break;
-
-    /* These don't affect pointer position */
-    case OP_INC:
-    case OP_SET:
-    case OP_OUT:
-    case OP_IN:
-    case OP_TRANSFER:
-    case OP_DIV:
-    case OP_MOD:
-      break;
-
-    /* SEEK_EMPTY has data-dependent movement - can't analyze */
-    case OP_SEEK_EMPTY:
-      return 0;
-
-    default:
-      fprintf(stderr, "analyze_loop_balance: unknown instruction %d\n",
-              instr->op);
-      exit(1);
-      return 0;
-    }
-    i++;
-  }
-
-  if (depth != 0) {
-    fprintf(stderr, "analyze_loop_balance: unmatched loop at instruction %u\n",
-            loop_start);
-    exit(1);
-    return 0;
-  }
-
-  *net_movement = movement;
-  return 1;
-}
-
-/*******************************************************************************
  * PASS: OFFSET THREADING (optimize_offsets)
  *
  * Eliminates most pointer movement (RIGHT) instructions by converting them
@@ -936,7 +1376,7 @@ void optimize_offsets(Program *output, const Program *original) {
       virtual_offset += instr->right.distance;
       break;
 
-    /* Operations that can take an offset - add virtual offset */
+      /* Operations that can take an offset - add virtual offset */
     case OP_INC:
     case OP_SET:
     case OP_OUT:
@@ -1046,118 +1486,6 @@ void optimize_offsets(Program *output, const Program *original) {
   }
 
   output->size = out_index;
-}
-
-/*******************************************************************************
- * HELPER: SET COVERS OFFSET
- *
- * Returns true if an OP_SET instruction (single-cell or multi-cell) writes
- * to the cell at the given offset. Handles stride=1 (contiguous) and
- * arbitrary stride (strided) multi-cell SETs.
- ******************************************************************************/
-static int set_covers_offset(const Instruction *instr, const i32 offset) {
-  if (instr->set.count == 1) {
-    return instr->set.offset == offset;
-  }
-  /* Multi-cell SET: check if offset is in range */
-  if (instr->set.stride <= 1) {
-    return offset >= instr->set.offset &&
-           offset < instr->set.offset + instr->set.count;
-  }
-  if (offset < instr->set.offset) {
-    return 0;
-  }
-  const i32 diff = offset - instr->set.offset;
-  if (diff % instr->set.stride != 0) {
-    return 0;
-  }
-  return diff / instr->set.stride < instr->set.count;
-}
-
-/*******************************************************************************
- * HELPER: IS CELL ASSIGNMENT
- *
- * Returns true if the instruction completely overwrites the cell at the given
- * offset, making any previous value irrelevant (dead).
- *
- * Assignment operations:
- *   - SET (single-cell or multi-cell if offset is in range)
- *   - IN (reads from input, replacing cell value)
- *   - MOD (assigns remainder to target)
- *   - Assignment-mode TRANSFER with single target (arg2 == 1, arg == 1)
- ******************************************************************************/
-static int is_cell_assignment(const Instruction *instr, const i32 offset) {
-  if (instr->op == OP_SET) {
-    return set_covers_offset(instr, offset);
-  }
-  if (instr->op == OP_IN && instr->in.offset == offset) {
-    return 1;
-  }
-  if (instr->op == OP_MOD && instr->mod.dst_offset == offset) {
-    return 1;
-  }
-  if (instr->op == OP_TRANSFER && instr->transfer.is_assignment == 1 &&
-      instr->transfer.target_count == 1 &&
-      instr->transfer.targets[0].offset == offset) {
-    return 1;
-  }
-  return 0;
-}
-
-/*******************************************************************************
- * HELPER: INSTRUCTION USES CELL
- *
- * Returns true if the instruction reads from (uses) the cell at the given
- *offset.
- *
- * This is used by dead store elimination: if a cell is read between a write
- * and a later overwrite, the earlier write is NOT dead.
- *
- * Returns 1 (conservatively assumes usage) for control flow instructions
- * since we can't reliably track what happens inside loops.
- ******************************************************************************/
-static int instruction_uses_cell(const Instruction *instr, const i32 offset) {
-  switch (instr->op) {
-  case OP_INC:
-    return instr->inc.offset == offset;
-
-  case OP_OUT:
-    return instr->out.offset == offset;
-
-  case OP_SET:
-    return 0; /* SET only writes, never reads */
-
-  case OP_IN:
-    return 0; /* IN only writes */
-
-  case OP_DIV:
-  case OP_MOD:
-    return instr->div.src_offset == offset; /* Reads dividend */
-
-  case OP_TRANSFER:
-    /* Reads source cell */
-    if (instr->transfer.src_offset == offset)
-      return 1;
-    /* Additive TRANSFER (is_assignment == 0) also reads target cells (to add to
-     * them) */
-    if (instr->transfer.is_assignment != 1) {
-      for (int t = 0; t < instr->transfer.target_count; t++) {
-        if (instr->transfer.targets[t].offset == offset)
-          return 1;
-      }
-    }
-    return 0;
-
-  /* Control flow - conservative, assume any cell might be used */
-  case OP_LOOP:
-  case OP_END:
-  case OP_RIGHT:
-  case OP_SEEK_EMPTY:
-    return 1;
-
-  default:
-    return 1;
-  }
 }
 
 /*******************************************************************************
@@ -1297,56 +1625,6 @@ void optimize_set_transfer_merge(Program *output, const Program *input) {
 }
 
 /*******************************************************************************
- * HELPER: MERGE INC INTO TRANSFER
- *
- * Attempts to fold an INC instruction into a TRANSFER's bias.
- *
- * CASE 1: INC targets a TRANSFER destination cell
- *   Original: TRANSFER ... target @X (factor F, bias B) ..., then INC n @X
- *   Merged:   TRANSFER ... target @X (factor F, bias B+n) ...
- *   Correctness: target += src*F + B, then target += n
- *                equals target += src*F + (B+n) ✓
- *
- * CASE 2: INC targets the TRANSFER's source cell (INC comes BEFORE TRANSFER)
- *   Original: INC n @src, then TRANSFER @src -> targets (factor F, bias B)
- *   Merged:   TRANSFER @src -> targets (factor F, bias B + n*F)
- *   Correctness: src becomes src+n, targets += (src+n)*F + B = src*F + n*F + B
- *                Merged reads original src: targets += src*F + (B + n*F) ✓
- *
- *   IMPORTANT: The INC is removed, so the source cell is NOT incremented.
- *   This is safe because TRANSFERs from optimize_multi_transfer are always
- *   followed by SET 0 on the source, making the INC's effect irrelevant.
- *
- * Returns 1 if merge was successful, 0 otherwise.
- ******************************************************************************/
-static int merge_inc_into_transfer(Instruction *transfer,
-                                   const Instruction *inc) {
-  /* Case 1: INC on a destination cell */
-  int target_idx = -1;
-  for (int t = 0; t < transfer->transfer.target_count; t++) {
-    if (transfer->transfer.targets[t].offset == inc->inc.offset) {
-      target_idx = t;
-    }
-  }
-
-  if (target_idx >= 0) {
-    transfer->transfer.targets[target_idx].bias += inc->inc.count;
-    return 1;
-  }
-
-  /* Case 2: INC on source cell */
-  if (inc->inc.offset == transfer->transfer.src_offset) {
-    for (int t = 0; t < transfer->transfer.target_count; t++) {
-      transfer->transfer.targets[t].bias +=
-          inc->inc.count * transfer->transfer.targets[t].factor;
-    }
-    return 1;
-  }
-
-  return 0;
-}
-
-/*******************************************************************************
  * PASS: INC + TRANSFER MERGE (optimize_inc_transfer_merge)
  *
  * Merges INC instructions adjacent to TRANSFER into the TRANSFER's biases.
@@ -1413,118 +1691,6 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-}
-
-/*******************************************************************************
- * PASS: DIVMOD PATTERN ANALYSIS (analyze_divmod_pattern)
- *
- * Recognizes a specific 6-instruction loop pattern that implements integer
- * division and modulo using a countdown technique.
- *
- * The exact pattern structure is:
- *   LOOP @dividend_off
- *   INC -1 @dividend_off
- *   TRANSFER @remainder_off -> @temp_off (factor=-1, bias=divisor-1),
- *                              @quotient_off (factor=1, bias=0)
- *   TRANSFER @temp_off -> @remainder_off (assignment, factor=1)
- *   SET 0 @temp_off
- *   END @dividend_off
- *
- * The divisor is encoded as (transfer1.targets[0].bias + 1).
- *
- * Returns 1 if pattern matches, 0 otherwise.
- * Sets output parameters to the relevant cell offsets and divisor value.
- ******************************************************************************/
-static int analyze_divmod_pattern(const Program *program,
-                                  const addr_t loop_start, i32 *dividend_off,
-                                  i32 *divisor, i32 *quotient_off,
-                                  i32 *remainder_off, i32 *temp_off) {
-  /* Need exactly 6 instructions (caller already verified loop_start is OP_LOOP)
-   */
-  if (loop_start + 5 >= program->size) {
-    return 0;
-  }
-
-  const Instruction *loop_instr = &program->instructions[loop_start];
-  const Instruction *inc_instr = &program->instructions[loop_start + 1];
-  const Instruction *transfer1 = &program->instructions[loop_start + 2];
-  const Instruction *transfer2 = &program->instructions[loop_start + 3];
-  const Instruction *set_instr = &program->instructions[loop_start + 4];
-  const Instruction *end_instr = &program->instructions[loop_start + 5];
-
-  /* Verify END matches LOOP */
-  if (end_instr->op != OP_END || end_instr->end.match_addr != (i32)loop_start) {
-    return 0;
-  }
-  if (end_instr->end.offset != loop_instr->loop.offset) {
-    return 0;
-  }
-
-  /* Must decrement dividend by 1 */
-  if (inc_instr->op != OP_INC || inc_instr->inc.count != -1 ||
-      inc_instr->inc.offset != loop_instr->loop.offset) {
-    return 0;
-  }
-
-  /* First TRANSFER: 2 targets, additive mode (is_assignment=0) */
-  if (transfer1->op != OP_TRANSFER || transfer1->transfer.target_count != 2 ||
-      transfer1->transfer.is_assignment != 0) {
-    return 0;
-  }
-
-  /* First target is temp with factor -1 */
-  if (transfer1->transfer.targets[0].factor != -1) {
-    return 0;
-  }
-
-  /* Second target is quotient with factor 1, no bias */
-  if (transfer1->transfer.targets[1].factor != 1 ||
-      transfer1->transfer.targets[1].bias != 0) {
-    return 0;
-  }
-
-  /* Second TRANSFER: assignment (is_assignment=1) from temp to remainder */
-  if (transfer2->op != OP_TRANSFER || transfer2->transfer.target_count != 1 ||
-      transfer2->transfer.is_assignment != 1) {
-    return 0;
-  }
-
-  /* Source of second TRANSFER must be temp cell */
-  if (transfer2->transfer.src_offset != transfer1->transfer.targets[0].offset) {
-    return 0;
-  }
-
-  /* Destination must be remainder (same as first TRANSFER's source), factor 1
-   */
-  if (transfer2->transfer.targets[0].offset != transfer1->transfer.src_offset ||
-      transfer2->transfer.targets[0].factor != 1) {
-    return 0;
-  }
-
-  /* SET clears temp cell */
-  if (set_instr->op != OP_SET || set_instr->set.value != 0 ||
-      set_instr->set.count != 1) {
-    return 0;
-  }
-  if (set_instr->set.offset != transfer1->transfer.targets[0].offset) {
-    return 0;
-  }
-
-  /* Extract values */
-  *dividend_off = loop_instr->loop.offset;
-  *divisor =
-      transfer1->transfer.targets[0].bias + 1; /* divisor encoded as bias+1 */
-  *quotient_off = transfer1->transfer.targets[1].offset;
-  *remainder_off =
-      transfer1->transfer.src_offset; /* source of first TRANSFER */
-  *temp_off = transfer1->transfer.targets[0].offset;
-
-  /* Divisor must be at least 2 */
-  if (*divisor < 2) {
-    return 0;
-  }
-
-  return 1;
 }
 
 /*******************************************************************************
@@ -1684,139 +1850,6 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
   }
 
   output->size = out_index;
-}
-
-/*******************************************************************************
- * HELPER: IS CELL KNOWN ZERO
- *
- * Determines if a cell at a given offset is provably zero before instruction i.
- * Scans backward, adjusting the offset when crossing RIGHT instructions.
- *
- * For transfer chain optimization, we've already found SET 0 @temp at set_idx,
- * which clears temp at end of each loop iteration. We just need to verify
- * temp was zero before the loop (for the first iteration).
- *
- * Returns: 1 if cell is provably zero, 0 otherwise
- ******************************************************************************/
-static int is_cell_known_zero(const Program *input, const addr_t i,
-                              const i32 offset) {
-  i32 adjusted_offset = offset;
-
-  for (addr_t k = i; k > 0; k--) {
-    const Instruction *prev = &input->instructions[k - 1];
-
-    /* SET at the adjusted offset (single-cell or multi-cell) */
-    if (prev->op == OP_SET && set_covers_offset(prev, adjusted_offset)) {
-      return prev->set.value == 0;
-    }
-
-    /* INC modifies the cell */
-    if (prev->op == OP_INC && prev->inc.offset == adjusted_offset) {
-      return 0;
-    }
-
-    /* IN writes to the cell */
-    if (prev->op == OP_IN && prev->in.offset == adjusted_offset) {
-      return 0;
-    }
-
-    /* TRANSFER might write to the cell */
-    if (prev->op == OP_TRANSFER &&
-        transfer_target_has_offset(prev, adjusted_offset)) {
-      return 0;
-    }
-
-    /* DIV/MOD write to dst_offset */
-    if ((prev->op == OP_DIV || prev->op == OP_MOD) &&
-        prev->div.dst_offset == adjusted_offset) {
-      return 0;
-    }
-
-    /* LOOP: continue scanning to verify cell was zero before loop */
-    if (prev->op == OP_LOOP) {
-      continue;
-    }
-
-    /* RIGHT: adjust offset and continue (undoing the pointer movement) */
-    if (prev->op == OP_RIGHT) {
-      adjusted_offset += prev->right.distance;
-      continue;
-    }
-
-    /* END/SEEK_EMPTY: can't analyze through these */
-    if (prev->op == OP_END || prev->op == OP_SEEK_EMPTY) {
-      return 0;
-    }
-  }
-
-  /* Reached beginning of program - all cells start at zero */
-  return 1;
-}
-
-/*******************************************************************************
- * HELPER: MERGE OR ADD TRANSFER TARGET
- *
- * Either merges with an existing target at the same offset (adding factors
- * and biases for additive mode) or adds a new target. Returns 1 on success,
- * 0 if array is full and target couldn't be added.
- ******************************************************************************/
-static int merge_or_add_target(TransferTarget *collected, int *num_collected,
-                               i32 offset, i32 factor, i32 bias) {
-  /* Check if offset already exists in collected - if so, merge */
-  for (int i = 0; i < *num_collected; i++) {
-    if (collected[i].offset == offset) {
-      collected[i].factor += factor;
-      collected[i].bias += bias;
-      return 1;
-    }
-  }
-
-  /* Not found - add new target if space available */
-  if (*num_collected >= MAX_TRANSFER_TARGETS) {
-    return 0;
-  }
-
-  collected[*num_collected].offset = offset;
-  collected[*num_collected].factor = factor;
-  collected[*num_collected].bias = bias;
-  (*num_collected)++;
-  return 1;
-}
-
-/*******************************************************************************
- * HELPER: COMPOSE TRANSFER TARGETS THROUGH TEMP
- *
- * Given a source-to-temp transfer (temp = source * temp_factor + temp_bias)
- * and a subsequent transfer FROM temp, composes the factors and biases to
- * produce direct source-to-final targets.
- *
- * For each target in `future`:
- *   composed_factor = temp_factor * target.factor
- *   composed_bias   = temp_bias * target.factor + target.bias
- *
- * Also detects source restoration (composed factor=1, bias=0 back to source).
- *
- * Returns 1 on success, 0 if collected array is full.
- ******************************************************************************/
-static int compose_transfer_targets(i32 temp_factor, i32 temp_bias,
-                                    i32 source_off, const Instruction *future,
-                                    TransferTarget *collected,
-                                    int *num_collected, int *source_restored) {
-  for (int t = 0; t < future->transfer.target_count; t++) {
-    i32 offset = future->transfer.targets[t].offset;
-    i32 factor = temp_factor * future->transfer.targets[t].factor;
-    i32 bias = temp_bias * future->transfer.targets[t].factor +
-               future->transfer.targets[t].bias;
-
-    if (offset == source_off && factor == 1 && bias == 0) {
-      *source_restored = 1;
-    }
-
-    if (!merge_or_add_target(collected, num_collected, offset, factor, bias)) {
-      return 0;
-    }
-  }
-  return 1;
 }
 
 /*******************************************************************************
@@ -2003,42 +2036,6 @@ void optimize_transfer_chain(Program *output, const Program *input) {
 }
 
 /*******************************************************************************
- * HELPER: INSTRUCTION TOUCHES OFFSET FOR CANCELLATION
- *
- * Returns true if the instruction interacts with the cell at the given offset
- * in any way (read or write). Used by INC cancellation to determine when
- * INC merging must stop.
- *
- * More conservative than instruction_uses_cell - we stop at ANY interaction.
- ******************************************************************************/
-static int instr_touches_offset_for_cancel(const Instruction *instr,
-                                           const i32 offset) {
-  switch (instr->op) {
-  case OP_INC:
-    return instr->inc.offset == offset;
-  case OP_SET:
-    return set_covers_offset(instr, offset);
-  case OP_OUT:
-    return instr->out.offset == offset;
-  case OP_IN:
-    return instr->in.offset == offset;
-  case OP_DIV:
-  case OP_MOD:
-    return instr->div.src_offset == offset || instr->div.dst_offset == offset;
-  case OP_TRANSFER:
-    return transfer_touches_offset(instr, offset);
-  /* Control flow - conservatively touches everything */
-  case OP_LOOP:
-  case OP_END:
-  case OP_RIGHT:
-  case OP_SEEK_EMPTY:
-    return 1;
-  default:
-    return 1;
-  }
-}
-
-/*******************************************************************************
  * PASS: INC CANCELLATION (optimize_inc_cancellation)
  *
  * Merges non-adjacent INC instructions on the same cell when no intervening
@@ -2162,10 +2159,10 @@ void optimize_program(Program *program) {
     run_pass(program, optimize_offsets); // eliminate RIGHT by using offsets
     run_pass(program, optimize_divmod);  // Divmod pattern detection
     run_pass(program, eliminate_dead_stores); // Dead store elimination - MUST
-                                              // run before SET+TRANSFER merge
+    // run before SET+TRANSFER merge
     run_pass(program,
              optimize_set_transfer_merge); // SET + TRANSFER merge (requires
-                                           // dead stores eliminated first)
+    // dead stores eliminated first)
     run_pass(program, optimize_inc_transfer_merge); // INC + TRANSFER merge
     run_pass(program, optimize_transfer_chain); // Transfer chain optimization
     run_pass(program, optimize_eliminate_temp_cells); // Temp cell elimination
