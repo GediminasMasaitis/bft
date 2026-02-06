@@ -1795,25 +1795,61 @@ static int merge_or_add_target(TransferTarget *collected, int *num_collected,
 }
 
 /*******************************************************************************
+ * HELPER: COMPOSE TRANSFER TARGETS THROUGH TEMP
+ *
+ * Given a source-to-temp transfer (temp = source * temp_factor + temp_bias)
+ * and a subsequent transfer FROM temp, composes the factors and biases to
+ * produce direct source-to-final targets.
+ *
+ * For each target in `future`:
+ *   composed_factor = temp_factor * target.factor
+ *   composed_bias   = temp_bias * target.factor + target.bias
+ *
+ * Also detects source restoration (composed factor=1, bias=0 back to source).
+ *
+ * Returns 1 on success, 0 if collected array is full.
+ ******************************************************************************/
+static int compose_transfer_targets(i32 temp_factor, i32 temp_bias,
+                                    i32 source_off, const Instruction *future,
+                                    TransferTarget *collected,
+                                    int *num_collected, int *source_restored) {
+  for (int t = 0; t < future->transfer.target_count; t++) {
+    i32 offset = future->transfer.targets[t].offset;
+    i32 factor = temp_factor * future->transfer.targets[t].factor;
+    i32 bias = temp_bias * future->transfer.targets[t].factor +
+               future->transfer.targets[t].bias;
+
+    if (offset == source_off && factor == 1 && bias == 0) {
+      *source_restored = 1;
+    }
+
+    if (!merge_or_add_target(collected, num_collected, offset, factor, bias)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/*******************************************************************************
  * PASS: TRANSFER CHAIN OPTIMIZATION (optimize_transfer_chain)
  *
  * Optimizes chains of transfers through temporary cells by composing the
  * factors and biases, eliminating the intermediate temp.
  *
  * Pattern:
- *   TRANSFER @source -> @temp (factor F1, bias B1), ...other targets
- *   TRANSFER @temp -> @final (factor F2, bias B2)
+ *   TRANSFER @source -> @temp (factor Ft, bias Bt), ...other targets
+ *   TRANSFER @temp -> @final (factor Ff, bias Bf)
  *   SET 0 @temp
  *
  * Composition math (additive transfers):
- *   temp += source * F1 + B1
- *   final += temp * F2 + B2
+ *   temp  += source * Ft + Bt
+ *   final += temp * Ff + Bf
  *
  * If temp starts at 0:
- *   final += (source * F1 + B1) * F2 + B2 = source * (F1*F2) + (B1*F2 + B2)
+ *   final += (source * Ft + Bt) * Ff + Bf = source * (Ft*Ff) + (Bt*Ff + Bf)
  *
  * Optimized to:
- *   TRANSFER @source -> @final (factor F1*F2, bias B1*F2+B2), ...other targets
+ *   TRANSFER @source -> @final (factor Ft*Ff, bias Bt*Ff+Bf), ...other targets
  *
  * The optimization handles multiple transfers from temp and can detect when
  * the source is "restored" (transferred back with factor 1, bias 0),
@@ -1833,8 +1869,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
       for (int temp_idx = 0; temp_idx < curr->transfer.target_count;
            temp_idx++) {
         const i32 temp_off = curr->transfer.targets[temp_idx].offset;
-        i32 F1 = curr->transfer.targets[temp_idx].factor;
-        i32 B1 = curr->transfer.targets[temp_idx].bias;
+        i32 temp_factor = curr->transfer.targets[temp_idx].factor;
+        i32 temp_bias = curr->transfer.targets[temp_idx].bias;
 
         /* Collect final targets: non-temp from curr + composed from later */
         TransferTarget collected[MAX_TRANSFER_TARGETS];
@@ -1863,32 +1899,16 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
 
           /* Additive TRANSFER FROM temp - compose factors */
-          /* Only valid if temp cell starts at zero (so temp = source*F1 + B1)
+          /* Only valid if temp cell starts at zero (so temp = source*Ft + Bt)
            */
           if (future->op == OP_TRANSFER &&
               future->transfer.src_offset == temp_off &&
               future->transfer.is_assignment == 0 &&
               is_cell_known_zero(input, i, temp_off)) {
-            for (int t = 0; t < future->transfer.target_count; t++) {
-              /* Compose: final += temp*Ft + Bt = source*(F1*Ft) + (B1*Ft + Bt)
-               */
-              i32 composed_offset = future->transfer.targets[t].offset;
-              i32 composed_factor = F1 * future->transfer.targets[t].factor;
-              i32 composed_bias = B1 * future->transfer.targets[t].factor +
-                                  future->transfer.targets[t].bias;
-
-              /* Check if this restores source (factor=1, bias=0 to source) */
-              if (composed_offset == source_off && composed_factor == 1 &&
-                  composed_bias == 0) {
-                source_restored = 1;
-              }
-
-              if (!merge_or_add_target(collected, &num_collected,
-                                       composed_offset, composed_factor,
-                                       composed_bias)) {
-                valid = 0;
-                break;
-              }
+            if (!compose_transfer_targets(temp_factor, temp_bias, source_off,
+                                          future, collected, &num_collected,
+                                          &source_restored)) {
+              valid = 0;
             }
             continue;
           }
@@ -1898,43 +1918,24 @@ void optimize_transfer_chain(Program *output, const Program *input) {
               future->transfer.src_offset == temp_off &&
               future->transfer.is_assignment == 1 &&
               future->transfer.target_count == 1) {
-            /*
-             * For assignment transfer: final = temp * F2 + B2
-             * If temp started at 0, then after additive transfer:
-             *   temp = 0 + source * F1 + B1 = source * F1 + B1
-             * So: final = (source * F1 + B1) * F2 + B2
-             *           = source * (F1*F2) + (B1*F2 + B2)
-             *
-             * We can safely compose if we can prove temp was zero.
-             */
-            i32 F2 = future->transfer.targets[0].factor;
-            i32 B2 = future->transfer.targets[0].bias;
 
 #ifdef UNSAFE_TRANSFER_CHAIN
             /* UNSAFE: Only handle source restoration case without verification
              */
+            i32 next_factor = future->transfer.targets[0].factor;
+            i32 next_bias = future->transfer.targets[0].bias;
             if (future->transfer.targets[0].offset == source_off &&
-                F1 * F2 == 1 && B1 * F2 + B2 == 0) {
+                temp_factor * next_factor == 1 &&
+                temp_bias * next_factor + next_bias == 0) {
               source_restored = 1;
               continue;
             }
 #else
             /* Safe mode: verify temp is zero, then compose */
             if (is_cell_known_zero(input, i, temp_off)) {
-              /* Compose the factors and biases */
-              i32 composed_offset = future->transfer.targets[0].offset;
-              i32 composed_factor = F1 * F2;
-              i32 composed_bias = B1 * F2 + B2;
-
-              /* Check if this restores source (factor=1, bias=0 to source) */
-              if (composed_offset == source_off && composed_factor == 1 &&
-                  composed_bias == 0) {
-                source_restored = 1;
-              }
-
-              if (!merge_or_add_target(collected, &num_collected,
-                                       composed_offset, composed_factor,
-                                       composed_bias)) {
+              if (!compose_transfer_targets(temp_factor, temp_bias, source_off,
+                                            future, collected, &num_collected,
+                                            &source_restored)) {
                 valid = 0;
                 break;
               }
