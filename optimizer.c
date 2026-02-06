@@ -121,6 +121,9 @@
  * To enable unsafe mode: compile with -DUNSAFE_TRANSFER_CHAIN
  */
 
+static int instr_touches_offset_for_cancel(const Instruction *instr,
+                                           const i32 offset);
+
 static i32 get_offset(const Instruction *instr) {
   switch (instr->op) {
   case OP_INC:
@@ -1648,22 +1651,8 @@ void optimize_eliminate_temp_cells(Program *output, const Program *input) {
             break;
           }
 
-          /* Temp is used - can't eliminate */
-          if ((future->op == OP_INC || future->op == OP_OUT ||
-               future->op == OP_DIV || future->op == OP_MOD ||
-               future->op == OP_IN) &&
-              get_offset(future) == temp_off) {
-            break;
-          }
-
-          if (future->op == OP_TRANSFER &&
-              future->transfer.src_offset == temp_off) {
-            break;
-          }
-
-          /* Control flow - can't analyze further */
-          if (future->op == OP_LOOP || future->op == OP_END ||
-              future->op == OP_RIGHT || future->op == OP_SEEK_EMPTY) {
+          /* Any other interaction with temp - can't analyze further */
+          if (instr_touches_offset_for_cancel(future, temp_off)) {
             break;
           }
         }
@@ -1957,17 +1946,8 @@ void optimize_transfer_chain(Program *output, const Program *input) {
             continue;
           }
 
-          /* Other temp uses invalidate */
-          if ((future->op == OP_INC || future->op == OP_OUT ||
-               future->op == OP_IN) &&
-              get_offset(future) == temp_off) {
-            valid = 0;
-            break;
-          }
-
-          /* Control flow invalidates */
-          if (future->op == OP_LOOP || future->op == OP_END ||
-              future->op == OP_RIGHT || future->op == OP_SEEK_EMPTY) {
+          /* Any other interaction with temp invalidates */
+          if (instr_touches_offset_for_cancel(future, temp_off)) {
             valid = 0;
             break;
           }
