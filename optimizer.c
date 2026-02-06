@@ -1986,26 +1986,20 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
         }
 
-        /* Filter out source restoration (it's a no-op: source += source is
-         * wrong) */
-        if (valid && set_idx > 0 && source_restored) {
-          int new_count = 0;
-          for (int t = 0; t < num_collected; t++) {
-            if (collected[t].offset != source_off || collected[t].factor != 1 ||
-                collected[t].bias != 0) {
-              collected[new_count++] = collected[t];
-            }
-          }
-          num_collected = new_count;
-        }
-
-        /* Filter out no-op targets (factor=0 and bias=0) */
+        /* Filter out source restorations and no-op targets */
         if (valid && set_idx > 0) {
           int new_count = 0;
           for (int t = 0; t < num_collected; t++) {
-            if (collected[t].factor != 0 || collected[t].bias != 0) {
-              collected[new_count++] = collected[t];
+            /* Skip source restoration (factor=1, bias=0 back to source) */
+            if (source_restored && collected[t].offset == source_off &&
+                collected[t].factor == 1 && collected[t].bias == 0) {
+              continue;
             }
+            /* Skip no-ops (factor=0 and bias=0) */
+            if (collected[t].factor == 0 && collected[t].bias == 0) {
+              continue;
+            }
+            collected[new_count++] = collected[t];
           }
           num_collected = new_count;
         }
