@@ -197,6 +197,32 @@ static i32 get_count(const Instruction *instr) {
 }
 
 /*******************************************************************************
+ * HELPER: TRANSFER TARGET HAS OFFSET
+ *
+ * Returns true if any of the TRANSFER's target cells matches the given offset.
+ * Does NOT check the source cell.
+ ******************************************************************************/
+static int transfer_target_has_offset(const Instruction *instr,
+                                      const i32 offset) {
+  for (int t = 0; t < instr->transfer.target_count; t++) {
+    if (instr->transfer.targets[t].offset == offset)
+      return 1;
+  }
+  return 0;
+}
+
+/*******************************************************************************
+ * HELPER: TRANSFER TOUCHES OFFSET
+ *
+ * Returns true if the TRANSFER's source cell OR any of its target cells
+ * matches the given offset.
+ ******************************************************************************/
+static int transfer_touches_offset(const Instruction *instr, const i32 offset) {
+  return instr->transfer.src_offset == offset ||
+         transfer_target_has_offset(instr, offset);
+}
+
+/*******************************************************************************
  * PASS: INSTRUCTION FOLDING (merge_consecutive_right_inc)
  *
  * Merges consecutive operations of the same type AND same offset into a single
@@ -719,12 +745,7 @@ void optimize_set_inc_merge(Program *output, const Program *original) {
 
         /* TRANSFER: buffer if it doesn't touch our target cell */
         if (next->op == OP_TRANSFER) {
-          int touches_target = (next->transfer.src_offset == target_offset);
-          for (int t = 0; t < next->transfer.target_count && !touches_target;
-               t++)
-            touches_target =
-                (next->transfer.targets[t].offset == target_offset);
-          if (!touches_target) {
+          if (!transfer_touches_offset(next, target_offset)) {
             if (moved_count < 256)
               moved_buffer[moved_count++] = *next;
             j++;
@@ -1356,13 +1377,7 @@ void optimize_inc_transfer_merge(Program *output, const Program *input) {
         } else {
           /* Check if INC interferes with TRANSFER */
           const Instruction *inc = &output->instructions[j];
-          int interferes = (inc->inc.offset == merged.transfer.src_offset);
-          for (int t = 0; t < merged.transfer.target_count && !interferes;
-               t++) {
-            if (inc->inc.offset == merged.transfer.targets[t].offset)
-              interferes = 1;
-          }
-          if (interferes)
+          if (transfer_touches_offset(&merged, inc->inc.offset))
             break;
         }
       }
@@ -1717,12 +1732,9 @@ static int is_cell_known_zero(const Program *input, const addr_t i,
     }
 
     /* TRANSFER might write to the cell */
-    if (prev->op == OP_TRANSFER) {
-      for (int t = 0; t < prev->transfer.target_count; t++) {
-        if (prev->transfer.targets[t].offset == adjusted_offset) {
-          return 0;
-        }
-      }
+    if (prev->op == OP_TRANSFER &&
+        transfer_target_has_offset(prev, adjusted_offset)) {
+      return 0;
     }
 
     /* DIV/MOD write to dst_offset */
@@ -1935,15 +1947,12 @@ void optimize_transfer_chain(Program *output, const Program *input) {
           }
 
           /* TRANSFER TO temp invalidates our analysis */
+          if (future->op == OP_TRANSFER &&
+              transfer_target_has_offset(future, temp_off)) {
+            valid = 0;
+            break;
+          }
           if (future->op == OP_TRANSFER) {
-            for (int t = 0; t < future->transfer.target_count; t++) {
-              if (future->transfer.targets[t].offset == temp_off) {
-                valid = 0;
-                break;
-              }
-            }
-            if (!valid)
-              break;
             continue;
           }
 
@@ -2036,13 +2045,7 @@ static int instr_touches_offset_for_cancel(const Instruction *instr,
   case OP_MOD:
     return instr->div.src_offset == offset || instr->div.dst_offset == offset;
   case OP_TRANSFER:
-    if (instr->transfer.src_offset == offset)
-      return 1;
-    for (int t = 0; t < instr->transfer.target_count; t++) {
-      if (instr->transfer.targets[t].offset == offset)
-        return 1;
-    }
-    return 0;
+    return transfer_touches_offset(instr, offset);
   /* Control flow - conservatively touches everything */
   case OP_LOOP:
   case OP_END:
